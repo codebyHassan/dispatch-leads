@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+{% block title %}FMCSA Register PDF Enricher — Extract & Scrape Missing Details{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>📄 FMCSA Register PDF Enricher</h1>
+    <div class="muted">
+      Upload any FMCSA Daily Register PDF — extracts all rows AND automatically scrapes missing details not in the PDF:
+      <strong>MC Number, Official Email, Authority Status, BIPD/Bond Insurance, Trucks/Drivers, Cargo &amp; MC Age (Months)</strong>.
+    </div>
+  </div>
+  <div style="display: flex; gap: 8px;">
+    <a href="{% url 'mc_scraper_web' %}" class="btn">⚡ Bulk MC Scraper</a>
+    <a href="{% url 'carrier_list' %}" class="btn">&larr; Carrier Search</a>
+  </div>
+</div>
+
+<!-- Upload & Controls Panel -->
+<div class="panel-strong">
+  <form id="pdf-upload-form" enctype="multipart/form-data">
+    {% csrf_token %}
+    <div class="grid-2">
+      <div>
+        <h3>1. Upload FMCSA Register PDF File</h3>
+        <p class="help-text">
+          Drop or select an official FMCSA Register Notice PDF (e.g., <code>REGISTER20260901.pdf</code>).
+          All 33+ pages (750+ applicants) are parsed &amp; live-enriched in ~4 seconds!
+        </p>
+        <div class="form-group" style="margin-top: 8px;">
+          <label for="id_pdf_file">Choose FMCSA Register PDF (<code>.pdf</code>)</label>
+          <input type="file" id="id_pdf_file" name="pdf_file" accept=".pdf,application/pdf"
+                 style="padding: 8px; border: 2px dashed #000; background: var(--hover-bg); width: 100%; cursor: pointer;">
+        </div>
+      </div>
+
+      <div>
+        <h3>2. What Missing Data Will Be Enriched Live?</h3>
+        <div style="font-size: 12px; line-height: 1.65; background: var(--hover-bg); padding: 10px 12px; border: 1px solid var(--border);">
+          <div><strong>✔ In PDF:</strong> USDOT Number, Legal Name, Filing Date, Mailing Address, Officer, Phone</div>
+          <div style="margin-top: 4px;">
+            <strong>⚡ Added Live from FMCSA (NOT in PDF):</strong>
+            <span class="badge badge-active" style="margin-left:4px;">MC / Docket #</span>
+            <span class="badge badge-active" style="margin-left:4px;">Official Email</span>
+            <span class="badge badge-active" style="margin-left:4px;">Active / Pending Status</span>
+            <span class="badge badge-active" style="margin-left:4px;">BIPD / Bond Insurance</span>
+            <span class="badge badge-active" style="margin-left:4px;">Trucks &amp; Drivers</span>
+            <span class="badge badge-active" style="margin-left:4px;">Cell Phone &amp; DBA</span>
+            <span class="badge badge-active" style="margin-left:4px;">MC Age (Months)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 10px; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+        <label style="font-weight: normal; font-size: 13px; margin: 0; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" id="id_auto_add_leads" name="auto_add_leads">
+          <strong>Auto-import all extracted carriers/brokers into CRM Leads Pipeline</strong>
+        </label>
+      </div>
+
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button type="button" id="btn-process-sample" class="btn" style="padding: 8px 14px; font-size: 13px;">
+          📄 Load &amp; Enrich Attached REGISTER20260901.pdf (33 Pages)
+        </button>
+        <button type="submit" id="btn-process-pdf" class="btn btn-primary" style="padding: 8px 18px; font-size: 14px;">
+          ⚡ Extract PDF &amp; Scrape Missing Details
+        </button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Animated Loading Progress Box -->
+<div id="pdf-loader-box" class="panel-strong" style="display: none; background: var(--hover-bg); margin-bottom: 16px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <div>
+      <span style="font-size: 16px; margin-right: 6px;">⏳</span>
+      <strong id="pdf-loader-status">Parsing PDF pages &amp; enriching missing MC, Email, Insurance &amp; Fleet details from live FMCSA...</strong>
+    </div>
+    <span id="pdf-loader-timer" class="mono muted">0.0s</span>
+  </div>
+  <div class="progress-track" style="height: 14px;">
+    <div class="progress-fill" style="width: 35%; animation: progressIndeterminate 1.2s infinite linear;"></div>
+  </div>
+  <div class="help-text" style="margin-top: 6px;">
+    Matching USDOTs &amp; Legal Names against US DOT Company Census (az4n-8mr2) &amp; Licensing/Insurance (6eyk-hxee)
+  </div>
+</div>
+
+<style>
+@keyframes progressIndeterminate {
+  0% { transform: translateX(-100%); width: 40%; }
+  100% { transform: translateX(250%); width: 40%; }
+}
+.badge-active { background: #000000; color: #FFFFFF; font-weight: 700; }
+.badge-pending { background: #6B6B6B; color: #FFFFFF; font-weight: 700; }
+.badge-not-active { background: #E5E5E5; color: #6B6B6B; border: 1px solid #000000; font-weight: 700; }
+.badge-carrier { background: #FFFFFF; color: #000000; border: 1px solid #000000; font-weight: 700; }
+.badge-broker { background: #000000; color: #FFFFFF; font-weight: 700; }
+.badge-carrier-broker { background: #000000; color: #FFFFFF; border: 2px solid #000000; font-weight: 700; letter-spacing: 0.5px; }
+.badge-new-data { background: #F2F2F2; color: #000000; border: 1px dashed #000000; font-size: 10px; padding: 1px 4px; }
+</style>
+
+<!-- Summary Dashboard Cards -->
+<div id="pdf-summary-cards" class="grid-4" style="display: none; margin-bottom: 16px;">
+  <div class="panel-strong">
+    <div class="muted" id="card-pdf-meta">PDF Rows Extracted</div>
+    <div id="card-total-rows" style="font-size: 24px; font-weight: 700;" class="mono">0</div>
+    <div class="muted" style="font-size: 11px;" id="card-release-date">—</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Missing MCs &amp; Emails Found</div>
+    <div style="font-size: 18px; font-weight: 700; padding-top: 4px;" class="mono">
+      <span id="card-mc-count">0</span> MCs &bull; <span id="card-email-count">0</span> Emails
+    </div>
+    <div class="muted" style="font-size: 11px;">100% absent from original PDF</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Authority Status (Live)</div>
+    <div style="font-size: 18px; font-weight: 700; padding-top: 4px;" class="mono">
+      <span id="card-active-count">0</span> Active &bull; <span id="card-pending-count">0</span> Pending
+    </div>
+    <div class="muted" style="font-size: 11px;">Real-time FMCSA docket status</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Entity Type Split</div>
+    <div id="card-entity-split" style="font-size: 16px; font-weight: 700; padding-top: 6px;" class="mono">0 Carriers / 0 Brokers</div>
+    <div class="muted" style="font-size: 11px;">Categorized + SAFER linked</div>
+  </div>
+</div>
+
+<!-- Results Table Panel -->
+<div id="pdf-results-panel" class="panel" style="display: none;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+      <h2 style="margin: 0;">Enriched PDF Applicants (<span id="shown-rows-count">0</span>)</h2>
+      <input type="text" id="pdf-table-search" placeholder="Filter by MC, DOT, Name, Email, State, Officer..."
+             style="width: 280px; padding: 5px 10px; font-size: 12px;">
+    </div>
+
+    <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+      <button type="button" class="btn btn-sm btn-primary" onclick="setPdfFilter('all', this)">All (<span id="f-all">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="setPdfFilter('has-mc', this)">Has MC # (<span id="f-mc">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="setPdfFilter('has-email', this)">Has Email (<span id="f-email">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="setPdfFilter('active', this)">Active Auth (<span id="f-active">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="setPdfFilter('carrier', this)">Carriers (<span id="f-carrier">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="setPdfFilter('broker', this)">Brokers (<span id="f-broker">0</span>)</button>
+
+      <form id="pdf-export-csv-form" method="post" action="{% url 'export_pdf_enriched_csv' %}" style="margin: 0;">
+        {% csrf_token %}
+        <input type="hidden" name="results_json" id="pdf_export_results_json" value="[]">
+        <button type="submit" class="btn btn-sm" style="background: #000; color: #fff; font-weight: 700;">
+          ⬇️ Download Full Enriched CSV
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="pdf-enriched-table">
+      <thead>
+        <tr>
+          <th>Pg</th>
+          <th>MC Number <span class="badge-new-data">LIVE</span></th>
+          <th>USDOT Number</th>
+          <th>Entity Type</th>
+          <th>Authority Status <span class="badge-new-data">LIVE</span></th>
+          <th>BIPD / Bond <span class="badge-new-data">LIVE</span></th>
+          <th>Company Legal Name</th>
+          <th>Owner / Officer</th>
+          <th>Phone (US Format)</th>
+          <th>Official Email <span class="badge-new-data">LIVE</span></th>
+          <th>MC Age (Months) <span class="badge-new-data">LIVE</span></th>
+          <th>Address / State</th>
+          <th>Fleet &amp; Cargo <span class="badge-new-data">LIVE</span></th>
+        </tr>
+      </thead>
+      <tbody id="pdf-enriched-tbody">
+        <!-- Populated via JS -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let allPdfRecords = [];
+let currentFilterMode = 'all';
+let pdfTimerInterval = null;
+
+function runPdfEnrichment(useSample) {
+  const fileInput = document.getElementById('id_pdf_file');
+  const autoAdd = document.getElementById('id_auto_add_leads').checked;
+
+  if (!useSample && (!fileInput.files || fileInput.files.length === 0)) {
+    alert("Please choose an FMCSA Register PDF file first, or click 'Load & Enrich Attached REGISTER20260901.pdf'.");
+    return;
+  }
+
+  const formData = new FormData();
+  if (useSample) {
+    formData.append('use_sample', 'true');
+  } else {
+    formData.append('pdf_file', fileInput.files[0]);
+  }
+  formData.append('auto_add_leads', autoAdd ? 'true' : 'false');
+
+  const loaderBox = document.getElementById('pdf-loader-box');
+  const timerEl = document.getElementById('pdf-loader-timer');
+  const btnUpload = document.getElementById('btn-process-pdf');
+  const btnSample = document.getElementById('btn-process-sample');
+
+  loaderBox.style.display = 'block';
+  btnUpload.disabled = true;
+  btnSample.disabled = true;
+
+  let startTime = Date.now();
+  clearInterval(pdfTimerInterval);
+  pdfTimerInterval = setInterval(() => {
+    timerEl.textContent = (((Date.now() - startTime) / 1000).toFixed(1)) + 's';
+  }, 100);
+
+  fetch("{% url 'api_process_register_pdf' %}", {
+    method: "POST",
+    headers: {
+      "X-CSRFToken": "{{ csrf_token }}"
+    },
+    body: formData
+  })
+  .then(res => res.json())
+  .then(data => {
+    clearInterval(pdfTimerInterval);
+    loaderBox.style.display = 'none';
+    btnUpload.disabled = false;
+    btnSample.disabled = false;
+
+    if (data.error) {
+      alert("Error: " + data.error);
+      return;
+    }
+
+    allPdfRecords = data.results || [];
+
+    // Populate summary cards
+    document.getElementById('pdf-summary-cards').style.display = 'grid';
+    document.getElementById('card-pdf-meta').textContent = `${data.filename} (${data.num_pages} Pages)`;
+    document.getElementById('card-total-rows').textContent = `${data.total} Rows`;
+    document.getElementById('card-release-date').textContent = data.release_date_notice
+      ? `Notice Date: ${data.release_date_notice}`
+      : 'All pages extracted & enriched';
+    document.getElementById('card-mc-count').textContent = data.mc_found_count;
+    document.getElementById('card-email-count').textContent = data.email_found_count;
+    document.getElementById('card-active-count').textContent = data.active_count;
+    document.getElementById('card-pending-count').textContent = data.pending_count;
+    document.getElementById('card-entity-split').textContent = `${data.carrier_count} Carriers / ${data.broker_count} Brokers`;
+
+    // Filter button counts
+    document.getElementById('f-all').textContent = data.total;
+    document.getElementById('f-mc').textContent = data.mc_found_count;
+    document.getElementById('f-email').textContent = data.email_found_count;
+    document.getElementById('f-active').textContent = data.active_count;
+    document.getElementById('f-carrier').textContent = data.carrier_count;
+    document.getElementById('f-broker').textContent = data.broker_count;
+
+    // Export JSON payload
+    document.getElementById('pdf_export_results_json').value = JSON.stringify(allPdfRecords);
+    document.getElementById('pdf-results-panel').style.display = 'block';
+
+    applyFilterAndSearch();
+  })
+  .catch(err => {
+    clearInterval(pdfTimerInterval);
+    loaderBox.style.display = 'none';
+    btnUpload.disabled = false;
+    btnSample.disabled = false;
+    alert("Failed to process PDF: " + err);
+  });
+}
+
+document.getElementById('pdf-upload-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  runPdfEnrichment(false);
+});
+
+document.getElementById('btn-process-sample').addEventListener('click', function() {
+  runPdfEnrichment(true);
+});
+
+document.getElementById('pdf-table-search').addEventListener('input', function() {
+  applyFilterAndSearch();
+});
+
+function setPdfFilter(mode, btnEl) {
+  currentFilterMode = mode;
+  const parent = btnEl.parentElement;
+  parent.querySelectorAll('button.btn-sm').forEach(b => b.classList.remove('btn-primary'));
+  btnEl.classList.add('btn-primary');
+  applyFilterAndSearch();
+}
+
+function applyFilterAndSearch() {
+  const q = (document.getElementById('pdf-table-search').value || '').trim().toLowerCase();
+
+  const filtered = allPdfRecords.filter(r => {
+    if (currentFilterMode === 'has-mc' && !r.mc_number) return false;
+    if (currentFilterMode === 'has-email' && !r.email) return false;
+    if (currentFilterMode === 'active' && !r.is_active) return false;
+    if (currentFilterMode === 'carrier' && !(r.entity_type || '').includes('CARRIER')) return false;
+    if (currentFilterMode === 'broker' && !(r.entity_type || '').includes('BROKER')) return false;
+
+    if (q) {
+      const hay = [
+        r.mc_number, r.dot_number, r.legal_name, r.dba_name,
+        r.owner_name, r.phone, r.cell_phone, r.email,
+        r.city, r.state, r.entity_type, r.pdf_category
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  document.getElementById('shown-rows-count').textContent = filtered.length;
+  renderPdfTableRows(filtered);
+}
+
+function renderPdfTableRows(records) {
+  const tbody = document.getElementById('pdf-enriched-tbody');
+  tbody.innerHTML = '';
+
+  const fragment = document.createDocumentFragment();
+
+  records.forEach(r => {
+    const tr = document.createElement('tr');
+
+    // MC Number column (Live Enriched + SAFER link)
+    let mcHtml = `<span class="badge badge-muted" title="Newly filed in Register; MC docket pending assignment">Pending MC</span>`;
+    if (r.mc_number) {
+      mcHtml = `<a href="https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string=${r.mc_number}" target="_blank" rel="noopener" title="Open MC-${r.mc_number} on FMCSA SAFER"><strong>MC-${r.mc_number} &nearr;</strong></a>`;
+      if (r.mc_number_2) {
+        mcHtml += `<div class="muted" style="font-size:10px;">MC-${r.mc_number_2}</div>`;
+      }
+    }
+
+    // USDOT Number column (SAFER link)
+    const dotHtml = `<a href="https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string=${r.dot_number}" target="_blank" rel="noopener" title="Open USDOT ${r.dot_number} on FMCSA SAFER"><strong>${r.dot_number} &nearr;</strong></a>`;
+
+    // Entity Type badge (linked to SAFER EntityType help)
+    let entityBadgeClass = 'badge-carrier';
+    if (r.entity_type === 'CARRIER/BROKER') {
+      entityBadgeClass = 'badge-carrier-broker';
+    } else if (r.entity_type === 'BROKER') {
+      entityBadgeClass = 'badge-broker';
+    }
+    const entityHtml = `
+      <a href="https://safer.fmcsa.dot.gov/saferhelp.aspx#EntityType" target="_blank" rel="noopener" style="text-decoration:none;">
+        <span class="badge ${entityBadgeClass}">${r.entity_type}</span>
+      </a>
+      <div class="muted" style="font-size: 10px; margin-top: 2px;">${r.pdf_category || ''}</div>
+    `;
+
+    // Authority Status badge
+    let statusBadgeClass = 'badge-not-active';
+    if (r.is_active) {
+      statusBadgeClass = 'badge-active';
+    } else if ((r.status_label || '').includes('PENDING')) {
+      statusBadgeClass = 'badge-pending';
+    }
+    const statusHtml = `<span class="badge ${statusBadgeClass}">${r.status_label}</span>`;
+
+    // Insurance badge
+    const insHtml = r.insurance_on_file
+      ? `<span class="badge badge-active">${r.insurance_status}</span>`
+      : `<span class="badge badge-not-active">${r.insurance_status}</span>`;
+
+    // Owner / Officer Name
+    let ownerHtml = r.owner_name && r.owner_name !== '—'
+      ? `<strong>${r.owner_name}</strong>`
+      : `<span class="muted">Not Listed</span>`;
+    if (r.officer_recovered) {
+      ownerHtml += ` <span class="badge-new-data" title="PDF had 'undefined undefined' — recovered from Live FMCSA">Recovered</span>`;
+    }
+
+    // Phone (Business + Cell in (309) 716-1835 format)
+    let phoneHtml = r.phone
+      ? `<div style="white-space:nowrap;"><a href="tel:${r.phone}" class="mono"><strong>${r.phone}</strong></a>
+         <button type="button" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px;" data-copy="${r.phone}">Copy</button></div>`
+      : `<span class="badge badge-muted">Missing</span>`;
+    if (r.cell_phone) {
+      phoneHtml += `<div class="muted mono" style="font-size: 11px; margin-top: 2px;">Cell: ${r.cell_phone}</div>`;
+    }
+
+    // Email (Live Enriched from FMCSA Census)
+    const emailHtml = r.email
+      ? `<div style="white-space:nowrap;"><a href="mailto:${r.email}"><strong>${r.email}</strong></a>
+         <button type="button" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px;" data-copy="${r.email}">Copy</button></div>`
+      : `<span class="badge badge-muted">None on File</span>`;
+
+    // MC Age & Filing Date
+    const ageHtml = `
+      <strong>${r.mc_age_months}</strong>
+      <div class="muted" style="font-size: 10px;">Filed: ${r.filing_date}</div>
+    `;
+
+    // Address / State
+    const addrHtml = `
+      <div><strong>${r.city || '—'}, ${r.state || '—'}</strong> ${r.zip_code || ''}</div>
+      <div class="muted" style="font-size: 10px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${r.address}">${r.address}</div>
+    `;
+
+    // Fleet & Cargo
+    const fleetHtml = `
+      <div class="mono"><strong>${r.power_units} PU / ${r.drivers} Drv</strong></div>
+      <div class="muted" style="font-size: 10px;">${r.cargo_carried || 'General Freight'}</div>
+    `;
+
+    tr.innerHTML = `
+      <td class="mono muted">${r.page}</td>
+      <td class="mono">${mcHtml}</td>
+      <td class="mono">${dotHtml}</td>
+      <td>${entityHtml}</td>
+      <td>${statusHtml}</td>
+      <td>${insHtml}</td>
+      <td>
+        <strong>${r.legal_name}</strong>
+        ${r.dba_name ? `<div class="muted" style="font-size: 11px;">DBA: ${r.dba_name}</div>` : ''}
+      </td>
+      <td>${ownerHtml}</td>
+      <td>${phoneHtml}</td>
+      <td>${emailHtml}</td>
+      <td class="mono">${ageHtml}</td>
+      <td>${addrHtml}</td>
+      <td>${fleetHtml}</td>
+    `;
+    fragment.appendChild(tr);
+  });
+
+  tbody.appendChild(fragment);
+
+  // Bind Copy buttons
+  tbody.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const val = this.getAttribute('data-copy');
+      navigator.clipboard.writeText(val).then(() => {
+        const oldText = this.textContent;
+        this.textContent = 'Copied!';
+        setTimeout(() => { this.textContent = oldText; }, 1200);
+      });
+    });
+  });
+}
+</script>
+{% endblock %}
+

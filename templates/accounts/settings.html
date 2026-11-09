@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Settings — Dispatch Lead Finder & CRM{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>System Settings & Templates</h1>
+  <a href="{% url 'sync_dashboard' %}" class="btn">Open Sync & Network Test</a>
+</div>
+
+<div class="panel-strong">
+  <strong>B2B Compliance Notice (US TCPA, CAN-SPAM & Do Not Call Rules):</strong>
+  <p class="muted" style="margin: 4px 0 0 0;">
+    Carrier phone and email records are retrieved from public FMCSA filings for B2B commercial freight dispatch inquiries only.
+    Respect business calling hours (9:00 AM – 5:00 PM carrier local time), honor all opt-out and "Do Not Contact" requests immediately,
+    and include accurate sender identification in any commercial email.
+  </p>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <h2>Network, Proxy & FMCSA Keys</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_settings">
+
+      <div class="form-group">
+        <label for="id_proxy_url">Proxy URL (Optional — for Pakistan to US VPN/Proxy routing)</label>
+        <input id="id_proxy_url" type="text" name="proxy_url" value="{{ cfg.proxy_url }}" placeholder="socks5://user:pass@host:port or http://host:port">
+        <div class="help-text">Used by all Socrata, QCMobile, and SAFER requests when a browser-only VPN is active.</div>
+      </div>
+
+      <div class="grid-3">
+        <div class="form-group">
+          <label for="id_delay">Request Delay (ms)</label>
+          <input id="id_delay" type="number" name="request_delay_ms" value="{{ cfg.request_delay_ms }}">
+        </div>
+        <div class="form-group">
+          <label for="id_timeout">Timeout (seconds)</label>
+          <input id="id_timeout" type="number" name="timeout_s" value="{{ cfg.timeout_s }}">
+        </div>
+        <div class="form-group">
+          <label for="id_concurrency">Max Concurrency</label>
+          <input id="id_concurrency" type="number" name="max_concurrency" value="{{ cfg.max_concurrency }}">
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="id_qcmobile">FMCSA QCMobile WebKey</label>
+          <input id="id_qcmobile" type="password" name="qcmobile_webkey" value="{{ cfg.qcmobile_webkey }}" placeholder="Enter FMCSA WebKey">
+        </div>
+        <div class="form-group">
+          <label for="id_freshness">Cache Freshness Window (Hours)</label>
+          <input id="id_freshness" type="number" name="freshness_hours" value="{{ cfg.freshness_hours }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="id_socrata">Socrata App Token (Optional — data.transportation.gov)</label>
+        <input id="id_socrata" type="text" name="socrata_app_token" value="{{ cfg.socrata_app_token }}" placeholder="Optional X-App-Token">
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border); margin: 16px 0;">
+      <h2>Lead Score Weights (0–100 Scale)</h2>
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="id_fmin">Target Fleet Min (Power Units)</label>
+          <input id="id_fmin" type="number" name="target_fleet_min" value="{{ cfg.target_fleet_min }}">
+        </div>
+        <div class="form-group">
+          <label for="id_fmax">Target Fleet Max (Power Units)</label>
+          <input id="id_fmax" type="number" name="target_fleet_max" value="{{ cfg.target_fleet_max }}">
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="form-group">
+          <label for="id_w_mc">New MC (&lt;90d)</label>
+          <input id="id_w_mc" type="number" name="weight_new_mc" value="{{ cfg.weight_new_mc }}">
+        </div>
+        <div class="form-group">
+          <label for="id_w_fleet">Target Fleet Size</label>
+          <input id="id_w_fleet" type="number" name="weight_fleet_size" value="{{ cfg.weight_fleet_size }}">
+        </div>
+        <div class="form-group">
+          <label for="id_w_phone">Phone Present</label>
+          <input id="id_w_phone" type="number" name="weight_phone" value="{{ cfg.weight_phone }}">
+        </div>
+        <div class="form-group">
+          <label for="id_w_email">Email Present</label>
+          <input id="id_w_email" type="number" name="weight_email" value="{{ cfg.weight_email }}">
+        </div>
+        <div class="form-group">
+          <label for="id_w_ins">Insurance Active</label>
+          <input id="id_w_ins" type="number" name="weight_insurance" value="{{ cfg.weight_insurance }}">
+        </div>
+        <div class="form-group">
+          <label for="id_w_safe">Safety OK</label>
+          <input id="id_w_safe" type="number" name="weight_safety" value="{{ cfg.weight_safety }}">
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Settings & Recalculate Scores</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Call Scripts & Email / SMS Templates</h2>
+    <p class="help-text" style="margin-bottom: 12px;">
+      Available placeholders: <span class="mono">{carrier_name}</span>, <span class="mono">{mc_number}</span>,
+      <span class="mono">{dot_number}</span>, <span class="mono">{state}</span>, <span class="mono">{power_units}</span>
+    </p>
+
+    {% for tmpl in templates %}
+      <div class="panel" style="padding: 10px; margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <div>
+            <strong>{{ tmpl.name }}</strong>
+            <span class="badge" style="margin-left: 6px;">{{ tmpl.get_type_display }}</span>
+          </div>
+          <form method="post" style="margin: 0;">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="delete_template">
+            <input type="hidden" name="template_id" value="{{ tmpl.pk }}">
+            <button type="submit" class="btn btn-sm">Delete</button>
+          </form>
+        </div>
+        <pre style="white-space: pre-wrap; font-family: var(--font-sans); font-size: 12px; margin: 0; color: var(--text-muted);">{{ tmpl.body }}</pre>
+      </div>
+    {% empty %}
+      <p class="muted">No scripts or templates saved yet.</p>
+    {% endfor %}
+
+    <hr style="border: 0; border-top: 1px solid var(--border); margin: 16px 0;">
+    <h3>Add New Template</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_template">
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="id_tname">Template Name</label>
+          <input id="id_tname" type="text" name="name" required placeholder="e.g. Follow-up Voicemail">
+        </div>
+        <div class="form-group">
+          <label for="id_ttype">Type</label>
+          <select id="id_ttype" name="type">
+            <option value="script">Call Script</option>
+            <option value="email">Email Template</option>
+            <option value="text">SMS / Text Template</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="id_tbody">Body Text</label>
+        <textarea id="id_tbody" name="body" required placeholder="Hi {carrier_name}, calling about MC-{mc_number} in {state}..."></textarea>
+      </div>
+      <button type="submit" class="btn">Add Template</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+

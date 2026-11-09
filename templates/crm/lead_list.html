@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Lead Pipeline — Dispatch Lead Finder & CRM{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Sales Lead Pipeline ({{ total_leads }})</h1>
+    <div class="muted">Manage your active dispatcher conversations from initial contact to signed deal.</div>
+  </div>
+  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <a href="{% url 'export_leads_csv' %}{% if status_filter %}?status={{ status_filter|urlencode }}{% endif %}" class="btn btn-sm">Export Leads CSV</a>
+    <a href="{% url 'import_leads_csv' %}" class="btn btn-sm">Import Leads CSV</a>
+    <a href="{% url 'carrier_list' %}" class="btn btn-sm btn-primary">+ Find New Carriers</a>
+  </div>
+</div>
+
+<!-- Controls bar: View mode & Filters -->
+<div class="panel" style="padding: 10px 14px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+    <span class="muted" style="font-size: 12px;">Stage Filter:</span>
+    <a href="?view={{ view_mode }}" class="btn btn-sm {% if not status_filter %}btn-primary{% endif %}">All</a>
+    <a href="?view={{ view_mode }}&status=New" class="btn btn-sm {% if status_filter == 'New' %}btn-primary{% endif %}">New</a>
+    <a href="?view={{ view_mode }}&status=Contacted" class="btn btn-sm {% if status_filter == 'Contacted' %}btn-primary{% endif %}">Contacted</a>
+    <a href="?view={{ view_mode }}&status=Interested" class="btn btn-sm {% if status_filter == 'Interested' %}btn-primary{% endif %}">Interested</a>
+    <a href="?view={{ view_mode }}&status=Negotiation" class="btn btn-sm {% if status_filter == 'Negotiation' %}btn-primary{% endif %}">Negotiation</a>
+    <a href="?view={{ view_mode }}&status=Signed" class="btn btn-sm {% if status_filter == 'Signed' %}btn-primary{% endif %}">Signed</a>
+    <a href="?view={{ view_mode }}&status=Rejected" class="btn btn-sm {% if status_filter == 'Rejected' %}btn-primary{% endif %}">Rejected</a>
+    <a href="?view={{ view_mode }}&status=Do+Not+Contact" class="btn btn-sm {% if status_filter == 'Do Not Contact' %}btn-primary{% endif %}">DNC</a>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <span class="muted" style="font-size: 12px;">View:</span>
+    <a href="?view=list{% if status_filter %}&status={{ status_filter|urlencode }}{% endif %}" class="btn btn-sm {% if view_mode != 'board' %}btn-primary{% endif %}">Table List</a>
+    <a href="?view=board{% if status_filter %}&status={{ status_filter|urlencode }}{% endif %}" class="btn btn-sm {% if view_mode == 'board' %}btn-primary{% endif %}">Board (Kanban)</a>
+  </div>
+</div>
+
+{% if view_mode == 'board' %}
+  <!-- Kanban Board View -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; align-items: start;">
+    {% for stage_name, stage_leads in board_stages %}
+      <div class="panel-strong" style="padding: 10px; background: var(--bg);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid var(--border-strong); padding-bottom: 4px;">
+          <strong>{{ stage_name }}</strong>
+          <span class="badge">{{ stage_leads|length }}</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px; min-height: 80px;">
+          {% for l in stage_leads %}
+            <div class="panel" style="padding: 8px; margin: 0; background: var(--hover-bg);">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <a href="{% url 'lead_detail' l.pk %}"><strong>{{ l.carrier.legal_name|truncatechars:22 }}</strong></a>
+                <span class="mono" style="font-size: 11px; font-weight: 700;">{{ l.score }}/100</span>
+              </div>
+              <div class="muted mono" style="font-size: 11px;">
+                DOT {{ l.carrier.dot_number }} | {{ l.carrier.state }}
+              </div>
+              <div style="margin-top: 4px; display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
+                <span>{{ l.carrier.power_units }} PU</span>
+                {% if l.carrier.phone_e164 %}
+                  <a href="tel:{{ l.carrier.phone_e164 }}" class="mono">{{ l.carrier.phone_e164 }}</a>
+                {% else %}
+                  <span class="badge badge-muted" style="font-size: 9px;">No Phone</span>
+                {% endif %}
+              </div>
+            </div>
+          {% empty %}
+            <div class="muted" style="font-size: 11px; padding: 10px 0; text-align: center;">No leads in this stage.</div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+{% else %}
+  <!-- Table List View -->
+  <div class="panel">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Carrier / Legal Name</th>
+            <th>DOT / MC</th>
+            <th>State</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Score</th>
+            <th>Contact Completeness</th>
+            <th>Carrier Local Time</th>
+            <th>Expected Trucks</th>
+            <th>Last Contact</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in leads %}
+            <tr>
+              <td>
+                <a href="{% url 'lead_detail' l.pk %}"><strong>{{ l.carrier.legal_name }}</strong></a>
+                {% if l.tags %}<div class="muted" style="font-size: 11px;">Tags: {{ l.tags }}</div>{% endif %}
+              </td>
+              <td class="mono">
+                DOT {{ l.carrier.dot_number }}<br>
+                <span class="muted">MC-{{ l.carrier.mc_number|default:"Missing" }}</span>
+              </td>
+              <td><strong>{{ l.carrier.state }}</strong> ({{ l.carrier.city }})</td>
+              <td><span class="badge badge-filled">{{ l.status }}</span></td>
+              <td><span class="badge">{{ l.priority }}</span></td>
+              <td class="mono">
+                <strong>{{ l.score }}</strong>/100
+              </td>
+              <td class="mono">
+                {{ l.carrier.contact_completeness.0 }}/{{ l.carrier.contact_completeness.1 }} fields
+                {% if l.carrier.phone_e164 %}&bull; Ph{% endif %}
+                {% if l.carrier.email and l.carrier.email_valid %}&bull; Em{% endif %}
+              </td>
+              <td>
+                <span class="mono">{{ l.carrier.local_time_info.formatted_time }}</span>
+                {% if l.carrier.local_time_info.is_good_time %}
+                  <span class="badge badge-filled" style="font-size: 9px; padding: 1px 4px;">CALL NOW</span>
+                {% endif %}
+              </td>
+              <td class="mono">{{ l.expected_trucks }} PU ({{ l.fee_percent }}%)</td>
+              <td class="mono">{{ l.last_contact_at|date:"Y-m-d H:i"|default:"Never" }}</td>
+              <td>
+                <a href="{% url 'lead_detail' l.pk %}" class="btn btn-sm btn-primary">Open Workspace</a>
+              </td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="11" class="muted">No leads found in this view. Search carriers to add leads.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}

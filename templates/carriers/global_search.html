@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Global Search — Dispatch Lead Finder{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Global Search Results for "{{ q }}"</h1>
+  <a href="{% url 'carrier_list' %}?q={{ q|urlencode }}" class="btn">Open in Full Carrier Search</a>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <h2>Matching Leads ({{ leads_found|length }})</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Lead / Carrier</th><th>DOT / MC</th><th>Status</th><th>Score</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for ld in leads_found %}
+            <tr>
+              <td><a href="{% url 'lead_detail' ld.pk %}"><strong>{{ ld.carrier.legal_name }}</strong></a></td>
+              <td class="mono">{{ ld.carrier.dot_number }} / MC-{{ ld.carrier.mc_number|default:"—" }}</td>
+              <td><span class="badge badge-filled">{{ ld.status }}</span></td>
+              <td class="mono">{{ ld.score }}/100</td>
+              <td><a href="{% url 'lead_detail' ld.pk %}" class="btn btn-sm">Open Lead</a></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="5" class="muted">No leads matched "{{ q }}".</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Matching Lead Notes ({{ notes_found|length }})</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Carrier</th><th>Note Snippet</th><th>Date</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for nt in notes_found %}
+            <tr>
+              <td><a href="{% url 'lead_detail' nt.lead_id %}"><strong>{{ nt.lead.carrier.legal_name }}</strong></a></td>
+              <td>{{ nt.body|truncatechars:80 }}</td>
+              <td class="mono">{{ nt.created_at|date:"Y-m-d" }}</td>
+              <td><a href="{% url 'lead_detail' nt.lead_id %}" class="btn btn-sm">Open Lead</a></td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="muted">No lead notes matched "{{ q }}".</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Matching Carriers ({{ carriers_found|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>DOT</th><th>MC</th><th>Legal Name</th><th>State / City</th><th>Phone</th><th>Email</th><th>Action</th></tr>
+      </thead>
+      <tbody>
+        {% for c in carriers_found %}
+          <tr>
+            <td class="mono"><a href="{% url 'carrier_detail' c.dot_number %}">{{ c.dot_number }}</a></td>
+            <td class="mono">{{ c.mc_number|default:"Missing" }}</td>
+            <td><a href="{% url 'carrier_detail' c.dot_number %}"><strong>{{ c.legal_name }}</strong></a></td>
+            <td>{{ c.city }}, {{ c.state }}</td>
+            <td class="mono">{{ c.phone_e164|default:"Missing" }}</td>
+            <td>{{ c.email|default:"Missing" }}</td>
+            <td><a href="{% url 'carrier_detail' c.dot_number %}" class="btn btn-sm">View Carrier</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7" class="muted">No carriers matched "{{ q }}".</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

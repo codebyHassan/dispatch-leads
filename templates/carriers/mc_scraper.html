@@ -1,0 +1,356 @@
+{% extends "base.html" %}
+{% block title %}Multi-Source Bulk MC Scraper — FMCSA SAFER & L&I{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Multi-Source Fast MC Scraper</h1>
+    <div class="muted">Scrapes Real Legal Name, Owner/Officer Name, US Phone (XXX) XXX-XXXX, Email, Exact MC Age in Months, Carrier/Broker status, and Insurance.</div>
+  </div>
+  <a href="{% url 'carrier_list' %}" class="btn">&larr; Carrier Search</a>
+</div>
+
+<!-- Controls & Input Form -->
+<div class="panel-strong">
+  <div class="grid-2">
+    <div>
+      <h3>Option A: Auto-Sequence (Starting MC + Count)</h3>
+      <p class="help-text">Enter a starting MC (e.g. <strong>1811001</strong>). System will automatically scrape <strong>1811002, 1811003, 1811004...</strong> in parallel!</p>
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="id_start_mc">Starting MC Number</label>
+          <input type="text" id="id_start_mc" placeholder="e.g. 1811001" value="1811001" class="mono" style="font-weight: 700;">
+        </div>
+        <div class="form-group">
+          <label for="id_count_select">How Many MCs Ahead?</label>
+          <select id="id_count_select">
+            <option value="25">Next 25 MCs</option>
+            <option value="50" selected>Next 50 MCs</option>
+            <option value="100">Next 100 MCs</option>
+            <option value="200">Next 200 MCs</option>
+            <option value="500">Next 500 MCs</option>
+            <option value="1000">Next 1,000 MCs</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Option B: Custom List / Paste Loads</h3>
+      <p class="help-text">Paste specific MC numbers from load boards (comma-separated or one per line):</p>
+      <div class="form-group">
+        <label for="id_custom_mcs">Custom MC List (Optional)</label>
+        <textarea id="id_custom_mcs" placeholder="e.g. 1492011, 1500200, 1620300" style="height: 62px; font-family: var(--font-mono); font-size: 12px;"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; flex-wrap: wrap; gap: 10px;">
+    <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+      <label style="font-weight: normal; font-size: 13px; margin: 0; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+        <input type="checkbox" id="id_auto_add_leads" checked>
+        <strong>Auto-import ACTIVE carriers directly into CRM Leads Pipeline</strong>
+      </label>
+      <label style="font-weight: normal; font-size: 13px; margin: 0; display: flex; align-items: center; gap: 6px; cursor: pointer;">
+        <input type="checkbox" id="id_active_only_filter">
+        <span>Only Show Active in Table</span>
+      </label>
+    </div>
+
+    <div style="display: flex; gap: 8px;">
+      <button type="button" id="btn-start-scrape" class="btn btn-primary" style="padding: 8px 18px; font-size: 14px;">
+        ⚡ Start Live Scrape
+      </button>
+      <form id="export-csv-form" method="post" action="{% url 'export_scraped_csv' %}" style="margin: 0; display: none;">
+        {% csrf_token %}
+        <input type="hidden" name="results_json" id="export_results_json" value="[]">
+        <button type="submit" class="btn btn-sm">⬇️ Download Results CSV</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Animated Loading Progress Box -->
+<div id="scraper-loader-box" class="panel-strong" style="display: none; background: var(--hover-bg); margin-bottom: 16px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+    <div>
+      <span style="font-size: 16px; margin-right: 6px;">⏳</span>
+      <strong id="loader-status-text">Scraping official FMCSA L&I & Census records across 50 workers...</strong>
+    </div>
+    <span id="loader-timer" class="mono muted">0.0s</span>
+  </div>
+  <div class="progress-track" style="height: 14px;">
+    <div id="loader-progress-bar" class="progress-fill" style="width: 25%; animation: progressIndeterminate 1.2s infinite linear;"></div>
+  </div>
+  <div class="help-text" style="margin-top: 6px;">
+    Extracting Company & Owner Name &bull; Phone (XXX) XXX-XXXX &bull; Email &bull; Exact MC Months &bull; BIPD Insurance coverage
+  </div>
+</div>
+
+<style>
+@keyframes progressIndeterminate {
+  0% { transform: translateX(-100%); width: 40%; }
+  100% { transform: translateX(250%); width: 40%; }
+}
+.badge-active { background: #000000; color: #FFFFFF; font-weight: 700; }
+.badge-pending { background: #6B6B6B; color: #FFFFFF; font-weight: 700; }
+.badge-not-active { background: #E5E5E5; color: #6B6B6B; border: 1px solid #000000; font-weight: 700; }
+.badge-carrier { background: #FFFFFF; color: #000000; border: 1px solid #000000; font-weight: 700; }
+.badge-broker { background: #000000; color: #FFFFFF; font-weight: 700; }
+.badge-carrier-broker { background: #000000; color: #FFFFFF; border: 2px solid #000000; font-weight: 700; letter-spacing: 0.5px; }
+</style>
+
+<!-- Live Results Summary Dashboard Cards -->
+<div id="results-summary-cards" class="grid-4" style="display: none; margin-bottom: 16px;">
+  <div class="panel-strong">
+    <div class="muted">Total MCs Scraped</div>
+    <div id="card-total" style="font-size: 24px; font-weight: 700;" class="mono">0</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Active Authorities</div>
+    <div id="card-active" style="font-size: 24px; font-weight: 700;" class="mono">0</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Pending / Not Active</div>
+    <div id="card-not-active" style="font-size: 24px; font-weight: 700;" class="mono">0</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Entity Split</div>
+    <div id="card-split" style="font-size: 16px; font-weight: 700; padding-top: 6px;" class="mono">0 Car / 0 Brok</div>
+  </div>
+</div>
+
+<!-- Scraped Leads Table -->
+<div id="results-table-panel" class="panel" style="display: none;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+    <h2 style="margin: 0;">Scraped MC Leads Data</h2>
+    <div style="display: flex; gap: 6px; align-items: center;">
+      <span class="muted" style="font-size: 12px;">Filter View:</span>
+      <button type="button" class="btn btn-sm" onclick="filterTable('all')">All (<span id="btn-count-all">0</span>)</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick="filterTable('active')">Active Only (<span id="btn-count-active">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="filterTable('not-active')">Not Active / Pending (<span id="btn-count-not-active">0</span>)</button>
+      <button type="button" class="btn btn-sm" onclick="filterTable('brokers')">Brokers</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="scraped-leads-table">
+      <thead>
+        <tr>
+          <th>MC Number</th>
+          <th>DOT Number</th>
+          <th>Entity Type</th>
+          <th>Authority Status</th>
+          <th>BIPD Insurance</th>
+          <th>Company Legal Name</th>
+          <th>Owner / Officer</th>
+          <th>Phone (Direct)</th>
+          <th>Official Email</th>
+          <th>MC Age (Months)</th>
+          <th>State / City</th>
+          <th>Fleet Size</th>
+        </tr>
+      </thead>
+      <tbody id="scraped-tbody">
+        <!-- Injected via JavaScript -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let lastScrapedData = [];
+let timerInterval = null;
+
+document.getElementById('btn-start-scrape').addEventListener('click', function() {
+  const startMc = document.getElementById('id_start_mc').value.trim();
+  const count = document.getElementById('id_count_select').value;
+  const customMcs = document.getElementById('id_custom_mcs').value.trim();
+  const autoAddLeads = document.getElementById('id_auto_add_leads').checked;
+
+  if (!startMc && !customMcs) {
+    alert("Please enter a Starting MC (e.g. 1811001) or paste a custom list of MCs.");
+    return;
+  }
+
+  // Show Loader
+  const loaderBox = document.getElementById('scraper-loader-box');
+  const timerEl = document.getElementById('loader-timer');
+  const statusText = document.getElementById('loader-status-text');
+  loaderBox.style.display = 'block';
+  document.getElementById('btn-start-scrape').disabled = true;
+  document.getElementById('export-csv-form').style.display = 'none';
+
+  let startTime = Date.now();
+  statusText.textContent = `Scraping batch of ${count} MCs across official FMCSA registries...`;
+
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    let elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    timerEl.textContent = `${elapsed}s`;
+  }, 100);
+
+  // Send AJAX POST to background threaded engine
+  fetch("{% url 'api_scrape_mc_batch' %}", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRFToken": "{{ csrf_token }}"
+    },
+    body: JSON.stringify({
+      start_mc: startMc,
+      count: count,
+      custom_mcs: customMcs,
+      auto_add_leads: autoAddLeads
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    clearInterval(timerInterval);
+    loaderBox.style.display = 'none';
+    document.getElementById('btn-start-scrape').disabled = false;
+
+    if (data.error) {
+      alert("Error: " + data.error);
+      return;
+    }
+
+    lastScrapedData = data.results || [];
+
+    // Update Summary Cards
+    document.getElementById('results-summary-cards').style.display = 'grid';
+    document.getElementById('card-total').textContent = data.total;
+    document.getElementById('card-active').textContent = data.active_count;
+    document.getElementById('card-not-active').textContent = data.not_active_count;
+    document.getElementById('card-split').textContent = `${data.carrier_count} Carriers / ${data.broker_count} Brokers`;
+
+    // Update Filter counts
+    document.getElementById('btn-count-all').textContent = data.total;
+    document.getElementById('btn-count-active').textContent = data.active_count;
+    document.getElementById('btn-count-not-active').textContent = data.not_active_count;
+
+    // Render Table
+    renderTableRows(lastScrapedData);
+
+    // Apply Active only if checked
+    if (document.getElementById('id_active_only_filter').checked) {
+      filterTable('active');
+    }
+
+    // Show Export Button
+    document.getElementById('export_results_json').value = JSON.stringify(lastScrapedData);
+    document.getElementById('export-csv-form').style.display = 'inline-block';
+    document.getElementById('results-table-panel').style.display = 'block';
+  })
+  .catch(err => {
+    clearInterval(timerInterval);
+    loaderBox.style.display = 'none';
+    document.getElementById('btn-start-scrape').disabled = false;
+    alert("Scraping request failed: " + err);
+  });
+});
+
+function renderTableRows(records) {
+  const tbody = document.getElementById('scraped-tbody');
+  tbody.innerHTML = '';
+
+  records.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.className = r.is_active ? 'row-active' : 'row-not-active';
+    if (r.entity_type && r.entity_type.includes('Broker')) {
+      tr.classList.add('row-broker');
+    }
+
+    let statusBadgeClass = 'badge-not-active';
+    if (r.is_active) {
+      statusBadgeClass = 'badge-active';
+    } else if (r.status_label && r.status_label.includes('PENDING')) {
+      statusBadgeClass = 'badge-pending';
+    }
+
+    const statusBadge = `<span class="badge ${statusBadgeClass}">${r.status_label || 'NOT ACTIVE'}</span>`;
+    let entityBadgeClass = 'badge-carrier';
+    if (r.entity_type === 'CARRIER/BROKER') {
+      entityBadgeClass = 'badge-carrier-broker';
+    } else if (r.entity_type === 'BROKER') {
+      entityBadgeClass = 'badge-broker';
+    }
+
+    const entityLink = `<a href="https://safer.fmcsa.dot.gov/saferhelp.aspx#EntityType" target="_blank" rel="noopener" style="text-decoration:none;"><span class="badge ${entityBadgeClass}">${r.entity_type}</span></a>`;
+
+    const phoneHtml = r.phone
+      ? `<a href="tel:${r.phone}" class="mono"><strong>${r.phone}</strong></a>
+         <button type="button" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px; margin-left: 4px;" data-copy="${r.phone}">Copy</button>`
+      : `<span class="badge badge-muted">Missing</span>`;
+
+    const emailHtml = r.email
+      ? `<a href="mailto:${r.email}">${r.email}</a>
+         <button type="button" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px; margin-left: 4px;" data-copy="${r.email}">Copy</button>`
+      : `<span class="badge badge-muted">Missing</span>`;
+
+    const insHtml = r.insurance_on_file
+      ? `<span class="badge badge-active">YES (${r.insurance_amount})</span>`
+      : `<span class="badge badge-not-active">${r.insurance_status}</span>`;
+
+    const mcLink = `<a href="https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string=${r.mc_number}" target="_blank" rel="noopener" title="Open on FMCSA SAFER"><strong>MC-${r.mc_number} &nearr;</strong></a>`;
+
+    const dotLink = r.dot_number && r.dot_number !== '—'
+      ? `<a href="https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string=${r.dot_number}" target="_blank" rel="noopener" title="Open DOT on FMCSA SAFER">${r.dot_number} &nearr;</a>`
+      : '—';
+
+    const ownerHtml = r.owner_name && r.owner_name !== '—'
+      ? `<strong>${r.owner_name}</strong>`
+      : `<span class="muted">—</span>`;
+
+    const ageHtml = r.grant_date && r.grant_date !== '—'
+      ? `<strong>${r.mc_age_months}</strong><div class="muted" style="font-size: 11px;">Issued: ${r.grant_date}</div>`
+      : `<strong>${r.mc_age_months}</strong>`;
+
+    tr.innerHTML = `
+      <td class="mono">${mcLink}</td>
+      <td class="mono">${dotLink}</td>
+      <td>${entityLink}</td>
+      <td>${statusBadge}</td>
+      <td>${insHtml}</td>
+      <td>
+        <strong>${r.legal_name || 'Carrier ' + r.mc_number}</strong>
+        ${r.dba_name ? `<div class="muted" style="font-size: 11px;">DBA: ${r.dba_name}</div>` : ''}
+      </td>
+      <td>${ownerHtml}</td>
+      <td>${phoneHtml}</td>
+      <td>${emailHtml}</td>
+      <td class="mono">${ageHtml}</td>
+      <td>${r.city || '—'}, <strong>${r.state || '—'}</strong></td>
+      <td class="mono">${r.power_units} PU / ${r.drivers} Drv</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Re-bind copy buttons
+  tbody.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', function() {
+      let t = this.getAttribute('data-copy');
+      navigator.clipboard.writeText(t).then(() => {
+        let old = this.textContent;
+        this.textContent = "Copied!";
+        setTimeout(() => this.textContent = old, 1200);
+      });
+    });
+  });
+}
+
+function filterTable(filterType) {
+  const rows = document.querySelectorAll('#scraped-tbody tr');
+  rows.forEach(r => {
+    if (filterType === 'all') {
+      r.style.display = '';
+    } else if (filterType === 'active') {
+      r.style.display = r.classList.contains('row-active') ? '' : 'none';
+    } else if (filterType === 'not-active') {
+      r.style.display = r.classList.contains('row-not-active') ? '' : 'none';
+    } else if (filterType === 'brokers') {
+      r.style.display = r.classList.contains('row-broker') ? '' : 'none';
+    }
+  });
+}
+</script>
+{% endblock %}

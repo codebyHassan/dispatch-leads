@@ -1,0 +1,501 @@
+{% extends "base.html" %}
+{% block title %}Lead Workspace: {{ carrier.legal_name }} (DOT {{ carrier.dot_number }}){% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>
+      {{ carrier.legal_name }}
+      <span class="badge badge-filled" style="vertical-align: middle;">{{ lead.status }}</span>
+      <span class="badge" style="vertical-align: middle;">Score: {{ lead.score }}/100</span>
+    </h1>
+    <div class="muted mono">
+      DOT #{{ carrier.dot_number }} | MC #{{ carrier.mc_number|default:"Missing" }} |
+      Owner: {{ lead.owner.username }} | Priority: {{ lead.priority }} |
+      Completeness: {{ carrier.contact_completeness.0 }}/{{ carrier.contact_completeness.1 }} contact fields
+    </div>
+  </div>
+  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <a href="{% url 'carrier_detail' carrier.dot_number %}" class="btn btn-sm">Carrier Raw Record</a>
+    <a href="https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string={{ carrier.dot_number }}" target="_blank" rel="noopener" class="btn btn-sm">Official SAFER &nearr;</a>
+    <a href="{% url 'lead_list' %}" class="btn btn-sm">&larr; Back to Pipeline</a>
+  </div>
+</div>
+
+<!-- Authority & Insurance Warnings -->
+{% if carrier.has_authority_alert or carrier.has_insurance_alert %}
+<div class="panel-strong" style="background: var(--hover-bg);">
+  <strong>[LEAD DISPATCH WARNING]</strong>
+  <ul style="margin: 4px 0 0 0; padding-left: 18px;">
+    {% if carrier.has_authority_alert %}
+      <li>Authority Status: <strong>{{ carrier.authority_status }}</strong> (Revocation or non-active status detected).</li>
+    {% endif %}
+    {% if not carrier.insurance_on_file %}
+      <li>No active BIPD insurance on file.</li>
+    {% elif carrier.has_insurance_alert %}
+      <li>Insurance expiring soon: <span class="mono">{{ carrier.insurance_expiry|date:"Y-m-d" }}</span> (within 30 days).</li>
+    {% endif %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="grid-2">
+  <!-- Left Column: All Carrier Info Panel & Manual Enrichment -->
+  <div>
+    <!-- All Carrier Info Panel (PRD 5.6) -->
+    <div class="panel-strong">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h3 style="margin: 0;">All Carrier Info (Read-Only Snapshot)</h3>
+        <span class="badge">{{ carrier.contact_completeness.0 }}/7 Fields</span>
+      </div>
+      <table>
+        <tbody>
+          <tr>
+            <td class="muted" style="width: 140px;">Legal / DBA</td>
+            <td>
+              <strong>{{ carrier.legal_name }}</strong>
+              {% if carrier.dba_name %}<div class="muted">DBA: {{ carrier.dba_name }}</div>{% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">DOT / MC</td>
+            <td class="mono">
+              DOT {{ carrier.dot_number }} / MC-{{ carrier.mc_number|default:"Missing" }}
+              <button type="button" class="btn btn-sm" style="float: right;" data-copy="{{ carrier.dot_number }}">Copy DOT</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Authority & Age</td>
+            <td>
+              <span class="badge {% if carrier.authority_status == 'Active' %}badge-filled{% endif %}">{{ carrier.authority_status }}</span>
+              <span class="mono">{{ carrier.authority_grant_date|date:"Y-m-d"|default:"Missing" }}</span>
+              ({{ carrier.mc_age_display }})
+              {% if carrier.is_new_authority %}<span class="badge badge-filled">NEW</span>{% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Location</td>
+            <td>
+              {{ carrier.address|default:"" }} {{ carrier.city }}, {{ carrier.state }} {{ carrier.zip_code }}
+              <button type="button" class="btn btn-sm" style="float: right;" data-copy="{{ carrier.city }}, {{ carrier.state }} {{ carrier.zip_code }}">Copy</button>
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Carrier Local Time</td>
+            <td>
+              <span class="mono"><strong>{{ carrier.local_time_info.formatted_time }}</strong></span>
+              {% if carrier.local_time_info.is_good_time %}
+                <span class="badge badge-filled">Good time to call (9AM–5PM)</span>
+              {% else %}
+                <span class="badge badge-muted">{{ carrier.local_time_info.label }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Phone</td>
+            <td>
+              {% if carrier.phone_e164 %}
+                <a href="tel:{{ carrier.phone_e164 }}" class="mono"><strong>{{ carrier.phone_e164 }}</strong></a>
+                <button type="button" class="btn btn-sm" style="float: right;" data-copy="{{ carrier.phone_e164 }}">Copy</button>
+                {% if carrier.phone_added_by_user %}<span class="badge" style="margin-left: 4px;">User enriched ({{ carrier.phone_source }})</span>{% endif %}
+              {% else %}
+                <span class="badge badge-muted">Missing</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Email</td>
+            <td>
+              {% if carrier.email and carrier.email_valid %}
+                <a href="mailto:{{ carrier.email }}">{{ carrier.email }}</a>
+                <button type="button" class="btn btn-sm" style="float: right;" data-copy="{{ carrier.email }}">Copy</button>
+                {% if carrier.email_added_by_user %}<span class="badge" style="margin-left: 4px;">User enriched ({{ carrier.email_source }})</span>{% endif %}
+              {% else %}
+                <span class="badge badge-muted">Missing</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Website</td>
+            <td>
+              {% if carrier.website %}
+                <a href="{{ carrier.website }}" target="_blank" rel="noopener">{{ carrier.website }}</a>
+                <button type="button" class="btn btn-sm" style="float: right;" data-copy="{{ carrier.website }}">Copy</button>
+              {% else %}
+                <span class="badge badge-muted">Missing</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Owner / Officer</td>
+            <td>
+              {% if carrier.owner_name %}
+                {{ carrier.owner_name }}
+              {% else %}
+                <span class="badge badge-muted">Missing</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td class="muted">Fleet / Cargo</td>
+            <td class="mono"><strong>{{ carrier.power_units }}</strong> PU / <strong>{{ carrier.drivers }}</strong> Drv | {{ carrier.cargo_types|join:", "|default:"General" }}</td>
+          </tr>
+          <tr>
+            <td class="muted">Insurance & Safety</td>
+            <td>
+              {% if carrier.insurance_on_file %}
+                <span class="badge badge-filled">YES (${{ carrier.insurance_amount }})</span>
+                {% if carrier.insurance_expiry %}Exp: <span class="mono">{{ carrier.insurance_expiry|date:"Y-m-d" }}</span>{% endif %}
+              {% else %}
+                <span class="badge">No BIPD File</span>
+              {% endif %}
+              | Safety: <span class="badge">{{ carrier.safety_rating }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Manual Contact Enrichment (Protected from Sync Overwrites) -->
+    <div class="panel">
+      <h3>Manual Contact Enrichment (Protected)</h3>
+      <p class="help-text" style="margin-top: 0;">Values saved here are locked and will NEVER be overwritten by background sync.</p>
+      <form method="post" action="{% url 'lead_manual_enrich' lead.pk %}">
+        {% csrf_token %}
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_e_phone">Direct Phone</label>
+            <input id="id_e_phone" type="text" name="phone" value="{{ carrier.phone|default:'' }}" placeholder="(214) 555-0199">
+          </div>
+          <div class="form-group">
+            <label for="id_e_email">Direct Email</label>
+            <input id="id_e_email" type="email" name="email" value="{{ carrier.email|default:'' }}" placeholder="owner@trucking.com">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_e_web">Website</label>
+            <input id="id_e_web" type="url" name="website" value="{{ carrier.website|default:'' }}" placeholder="https://...">
+          </div>
+          <div class="form-group">
+            <label for="id_e_owner">Owner / Decision Maker</label>
+            <input id="id_e_owner" type="text" name="owner_name" value="{{ carrier.owner_name|default:'' }}" placeholder="John Doe">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_e_source">Verification Source</label>
+            <select id="id_e_source" name="source">
+              <option value="Call">Call</option>
+              <option value="Website">Website</option>
+              <option value="Email reply">Email reply</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div style="display: flex; align-items: flex-end; margin-bottom: 12px;">
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Save & Lock Enrichment</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Additional Contact Persons -->
+    <div class="panel">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h3 style="margin: 0;">Contact People ({{ contacts|length }})</h3>
+      </div>
+      {% for ct in contacts %}
+        <div class="panel" style="padding: 8px; margin-bottom: 6px; background: var(--hover-bg);">
+          <div style="display: flex; justify-content: space-between;">
+            <strong>{{ ct.name }}</strong> <span class="muted">{{ ct.role }}</span>
+          </div>
+          <div class="mono" style="font-size: 12px; margin-top: 4px;">
+            {% if ct.phone %}<a href="tel:{{ ct.phone }}">{{ ct.phone }}</a>{% endif %}
+            {% if ct.email %} | <a href="mailto:{{ ct.email }}">{{ ct.email }}</a>{% endif %}
+            <span class="badge" style="margin-left: 6px;">{{ ct.source }}</span>
+          </div>
+        </div>
+      {% empty %}
+        <p class="muted" style="font-size: 12px;">No extra contact people added yet.</p>
+      {% endfor %}
+
+      <form method="post" action="{% url 'lead_add_contact' lead.pk %}" style="margin-top: 10px;">
+        {% csrf_token %}
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_ct_name">Contact Name</label>
+            <input id="id_ct_name" type="text" name="name" required placeholder="Jane Smith">
+          </div>
+          <div class="form-group">
+            <label for="id_ct_role">Role</label>
+            <input id="id_ct_role" type="text" name="role" value="Dispatcher / Fleet Mgr">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_ct_phone">Phone</label>
+            <input id="id_ct_phone" type="text" name="phone" placeholder="(555) 000-1111">
+          </div>
+          <div class="form-group">
+            <label for="id_ct_email">Email</label>
+            <input id="id_ct_email" type="email" name="email" placeholder="jane@company.com">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-sm">+ Add Contact Person</button>
+      </form>
+    </div>
+
+    <!-- Lead Score Breakdown (0-100) -->
+    <div class="panel">
+      <h3>Lead Score: {{ lead.score }} / 100</h3>
+      <table>
+        <tbody>
+          {% for criterion, points in lead.score_breakdown.items %}
+            <tr>
+              <td>{{ criterion }}</td>
+              <td class="mono" style="text-align: right;"><strong>+{{ points }}</strong></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="help-text">Weights can be configured in <a href="{% url 'settings' %}">Settings</a>.</div>
+    </div>
+  </div>
+
+  <!-- Right Column: Status Pipeline, Quick Notes, Activities, Tasks, Scripts -->
+  <div>
+    <!-- Pipeline Stage & Deal Info -->
+    <div class="panel-strong">
+      <h3>Pipeline Stage & Status</h3>
+      <form method="post" action="{% url 'lead_update_status' lead.pk %}">
+        {% csrf_token %}
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_status_select">Current Status</label>
+            <select id="id_status_select" name="status">
+              {% for val, label in status_choices %}
+                <option value="{{ val }}" {% if lead.status == val %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="id_lost_reason">Reason for Loss (If Rejected)</label>
+            <select id="id_lost_reason" name="lost_reason">
+              {% for val, label in lost_reason_choices %}
+                <option value="{{ val }}" {% if lead.lost_reason == val %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="id_dnc_reason">DNC Opt-Out Reason (If Do Not Contact)</label>
+          <input id="id_dnc_reason" type="text" name="dnc_reason" value="{{ lead.dnc_reason }}" placeholder="e.g. Requested removal on 11/08">
+        </div>
+        <button type="submit" class="btn btn-primary">Update Status</button>
+      </form>
+
+      <hr style="border: 0; border-top: 1px solid var(--border); margin: 14px 0;">
+
+      <!-- Deal & Dispatch Info -->
+      <form method="post" action="{% url 'lead_update_details' lead.pk %}">
+        {% csrf_token %}
+        <div class="grid-3">
+          <div class="form-group">
+            <label for="id_exp_trucks">Expected Trucks</label>
+            <input id="id_exp_trucks" type="number" name="expected_trucks" value="{{ lead.expected_trucks }}">
+          </div>
+          <div class="form-group">
+            <label for="id_fee">Fee %</label>
+            <input id="id_fee" type="number" step="0.1" name="fee_percent" value="{{ lead.fee_percent }}">
+          </div>
+          <div class="form-group">
+            <label for="id_val">Monthly Value ($)</label>
+            <input id="id_val" type="number" step="0.01" name="expected_monthly_value" value="{{ lead.expected_monthly_value }}">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_priority">Priority</label>
+            <select id="id_priority" name="priority">
+              {% for val, label in priority_choices %}
+                <option value="{{ val }}" {% if lead.priority == val %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="id_tags">Tags</label>
+            <input id="id_tags" type="text" name="tags" value="{{ lead.tags }}" placeholder="e.g. reefer, owner-operator">
+          </div>
+        </div>
+        <button type="submit" class="btn btn-sm">Save Deal Details</button>
+      </form>
+    </div>
+
+    <!-- Call Scripts & Templates Modal/Box -->
+    <div class="panel">
+      <h3>Call Scripts & Message Templates</h3>
+      <p class="help-text">Placeholders are automatically filled with {{ carrier.legal_name }} data:</p>
+      {% for st in rendered_templates %}
+        <div class="panel" style="padding: 10px; margin-bottom: 8px; background: var(--hover-bg);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <strong>{{ st.name }}</strong>
+            <div>
+              <span class="badge">{{ st.type }}</span>
+              <button type="button" class="btn btn-sm" style="margin-left: 4px;" data-copy="{{ st.body }}">Copy Script</button>
+            </div>
+          </div>
+          <pre style="white-space: pre-wrap; font-family: var(--font-sans); font-size: 12px; margin: 0; color: var(--text);">{{ st.body }}</pre>
+        </div>
+      {% empty %}
+        <p class="muted">No templates available. Add them in Settings.</p>
+      {% endfor %}
+    </div>
+
+    <!-- Quick Notes (Pinned First) -->
+    <div class="panel">
+      <h3>Notes</h3>
+      <!-- Quick Note Box -->
+      <form method="post" action="{% url 'lead_add_note' lead.pk %}" style="margin-bottom: 12px;">
+        {% csrf_token %}
+        <div class="form-group">
+          <label for="id_note_body" style="display: none;">Add Note</label>
+          <textarea id="id_note_body" name="body" required placeholder="Type a note about this carrier..."></textarea>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <label style="font-weight: normal; margin: 0; font-size: 12px;">
+            <input type="checkbox" name="is_pinned"> Pin note to top
+          </label>
+          <button type="submit" class="btn btn-sm btn-primary">Save Note</button>
+        </div>
+      </form>
+
+      {% for n in notes %}
+        <div class="panel" style="padding: 8px 10px; margin-bottom: 8px; {% if n.is_pinned %}border: 1px solid var(--border-strong); background: var(--hover-bg);{% endif %}">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <div>
+              <strong>{{ n.author.username }}</strong>
+              <span class="muted mono" style="font-size: 11px;">({{ n.created_at|date:"M d, H:i" }} PKT)</span>
+              {% if n.is_pinned %}<span class="badge badge-filled" style="font-size: 9px;">PINNED</span>{% endif %}
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <form method="post" action="{% url 'lead_toggle_pin_note' lead.pk n.pk %}" style="margin: 0;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px;">{% if n.is_pinned %}Unpin{% else %}Pin{% endif %}</button>
+              </form>
+              <form method="post" action="{% url 'lead_delete_note' lead.pk n.pk %}" style="margin: 0;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px;">Delete</button>
+              </form>
+            </div>
+          </div>
+          <div style="font-size: 13px; white-space: pre-wrap;">{{ n.body }}</div>
+        </div>
+      {% empty %}
+        <p class="muted" style="font-size: 12px;">No notes yet.</p>
+      {% endfor %}
+    </div>
+
+    <!-- Tasks & Follow-Ups -->
+    <div class="panel">
+      <h3>Tasks & Follow-Ups</h3>
+      <form method="post" action="{% url 'lead_add_task' lead.pk %}" style="margin-bottom: 12px;">
+        {% csrf_token %}
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_t_title">Task Title</label>
+            <input id="id_t_title" type="text" name="title" required placeholder="Follow-up call">
+          </div>
+          <div class="form-group">
+            <label for="id_t_due">Due Date & Time (PKT)</label>
+            <input id="id_t_due" type="datetime-local" name="due_at" required>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_t_repeat">Repeat Every (Days)</label>
+            <input id="id_t_repeat" type="number" name="repeat_days" value="0">
+          </div>
+          <div style="display: flex; align-items: flex-end; margin-bottom: 12px;">
+            <button type="submit" class="btn btn-sm btn-primary" style="width: 100%;">Schedule Task</button>
+          </div>
+        </div>
+      </form>
+
+      {% for tk in tasks %}
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border);">
+          <div>
+            <form method="post" action="{% url 'lead_toggle_task' lead.pk tk.pk %}" style="display: inline; margin: 0;">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm" style="padding: 1px 6px;">
+                {% if tk.is_done %}&check; Done{% else %}Mark Done{% endif %}
+              </button>
+            </form>
+            <span style="margin-left: 6px; {% if tk.is_done %}text-decoration: line-through; color: var(--text-muted);{% endif %}">
+              <strong>{{ tk.title }}</strong>
+            </span>
+          </div>
+          <div class="mono muted" style="font-size: 12px;">
+            Due: {{ tk.due_at|date:"M d, H:i" }} PKT
+            {% if tk.repeat_days %}(Repeats {{ tk.repeat_days }}d){% endif %}
+          </div>
+        </div>
+      {% empty %}
+        <p class="muted" style="font-size: 12px;">No tasks scheduled.</p>
+      {% endfor %}
+    </div>
+
+    <!-- Activity Log & Timeline -->
+    <div class="panel">
+      <h3>Log Activity</h3>
+      <form method="post" action="{% url 'lead_log_activity' lead.pk %}" style="margin-bottom: 12px;">
+        {% csrf_token %}
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="id_act_type">Activity Type</label>
+            <select id="id_act_type" name="type">
+              <option value="call">Call</option>
+              <option value="email">Email</option>
+              <option value="text">Text / SMS</option>
+              <option value="meeting">Meeting</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="id_act_out">Outcome</label>
+            <select id="id_act_out" name="outcome">
+              <option value="Spoke">Spoke</option>
+              <option value="Voicemail">Voicemail</option>
+              <option value="No answer">No answer</option>
+              <option value="Callback requested">Callback requested</option>
+              <option value="Not interested">Not interested</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="id_act_body">Details / Notes</label>
+          <input id="id_act_body" type="text" name="body" placeholder="Owner requested 2 reefer loads out of Dallas for Thursday">
+        </div>
+        <button type="submit" class="btn btn-sm">Log Activity</button>
+      </form>
+
+      <h3>Activity Timeline</h3>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        {% for act in activities %}
+          <div style="border-left: 2px solid var(--border-strong); padding-left: 10px;">
+            <div style="display: flex; justify-content: space-between; font-size: 12px;">
+              <span>
+                <strong class="badge">{{ act.type|upper }}</strong>
+                {% if act.outcome %}<strong>{{ act.outcome }}</strong>{% endif %}
+              </span>
+              <span class="mono muted">{{ act.created_at|date:"Y-m-d H:i" }}</span>
+            </div>
+            {% if act.body %}
+              <div style="font-size: 13px; margin-top: 2px;">{{ act.body }}</div>
+            {% endif %}
+          </div>
+        {% empty %}
+          <p class="muted" style="font-size: 12px;">No activity logged yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

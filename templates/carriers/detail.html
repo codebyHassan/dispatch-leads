@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block title %}{{ carrier.legal_name }} (DOT {{ carrier.dot_number }}){% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>
+      {{ carrier.legal_name }}
+      {% if carrier.is_new_authority %}
+        <span class="badge badge-filled" style="vertical-align: middle;">NEW MC ({{ carrier.mc_age_display }})</span>
+      {% endif %}
+    </h1>
+    <div class="muted mono">
+      DOT #{{ carrier.dot_number }} | MC #{{ carrier.mc_number|default:"Missing" }} |
+      Completeness: {{ carrier.contact_completeness.0 }}/{{ carrier.contact_completeness.1 }} contact fields |
+      Last Synced: {{ carrier.last_synced_at|date:"Y-m-d H:i:s" }} PKT ({{ carrier.source }})
+    </div>
+  </div>
+  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <form method="post" action="{% url 'carrier_refresh' carrier.dot_number %}" style="margin: 0;">
+      {% csrf_token %}
+      <button type="submit" class="btn">Refresh Now (Real-Time)</button>
+    </form>
+    {% if lead %}
+      <a href="{% url 'lead_detail' lead.pk %}" class="btn btn-primary">Open Lead ({{ lead.status }})</a>
+    {% else %}
+      <a href="{% url 'add_carrier_to_leads' carrier.dot_number %}" class="btn btn-primary">Add to Leads</a>
+    {% endif %}
+    <a href="https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=USDOT&query_string={{ carrier.dot_number }}" target="_blank" rel="noopener" class="btn">Official FMCSA SAFER &nearr;</a>
+  </div>
+</div>
+
+{% if carrier.has_authority_alert or carrier.has_insurance_alert %}
+<div class="panel-strong" style="background: var(--hover-bg);">
+  <strong>[CARRIER COMPLIANCE / DISPATCH ALERT]</strong>
+  <ul style="margin: 6px 0 0 0; padding-left: 18px;">
+    {% if carrier.has_authority_alert %}
+      <li>Operating Authority is currently <strong>{{ carrier.authority_status }}</strong>{% if carrier.authority_revoked_at %} (Revoked on {{ carrier.authority_revoked_at|date:"Y-m-d" }}){% endif %}.</li>
+    {% endif %}
+    {% if not carrier.insurance_on_file %}
+      <li><strong>No BIPD Liability Insurance on file.</strong> Carrier may need insurance activation before dispatching.</li>
+    {% elif carrier.has_insurance_alert %}
+      <li><strong>Insurance Expiring Soon:</strong> Policy expires on <span class="mono">{{ carrier.insurance_expiry|date:"Y-m-d" }}</span> (within 30-day window).</li>
+    {% endif %}
+  </ul>
+</div>
+{% endif %}
+
+{% if duplicate_carriers %}
+<div class="panel">
+  <strong>Possible Duplicate Carriers Sharing Phone or Email:</strong>
+  <div style="margin-top: 6px; display: flex; gap: 10px; flex-wrap: wrap;">
+    {% for dup in duplicate_carriers %}
+      <a href="{% url 'carrier_detail' dup.dot_number %}" class="btn btn-sm">
+        DOT {{ dup.dot_number }} — {{ dup.legal_name }} ({{ dup.state }})
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="grid-3">
+  <div class="panel">
+    <h3>1. Identity & Authority</h3>
+    <table>
+      <tbody>
+        <tr>
+          <td class="muted">Legal Name</td>
+          <td>
+            <strong>{{ carrier.legal_name }}</strong>
+            <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.legal_name }}">Copy</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">DBA Name</td>
+          <td>{% if carrier.dba_name %}{{ carrier.dba_name }}{% else %}<span class="badge badge-muted">Missing</span>{% endif %}</td>
+        </tr>
+        <tr>
+          <td class="muted">DOT Number</td>
+          <td class="mono">
+            {{ carrier.dot_number }}
+            <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.dot_number }}">Copy</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">MC Number</td>
+          <td class="mono">
+            {% if carrier.mc_number %}
+              MC-{{ carrier.mc_number }}
+              <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.mc_number }}">Copy</button>
+            {% else %}
+              <span class="badge badge-muted">Missing</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Authority Status</td>
+          <td><span class="badge {% if carrier.authority_status == 'Active' %}badge-filled{% endif %}">{{ carrier.authority_status }}</span> ({{ carrier.authority_type }})</td>
+        </tr>
+        <tr>
+          <td class="muted">Grant Date / Age</td>
+          <td class="mono">{{ carrier.authority_grant_date|date:"Y-m-d"|default:"Missing" }} ({{ carrier.mc_age_display }})</td>
+        </tr>
+        <tr>
+          <td class="muted">MCS-150 Date</td>
+          <td class="mono">{{ carrier.mcs150_date|date:"Y-m-d"|default:"Missing" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>2. Location, Contact & Local Time</h3>
+    <table>
+      <tbody>
+        <tr>
+          <td class="muted">Address</td>
+          <td>
+            {% if carrier.address %}{{ carrier.address }}, {% endif %}{{ carrier.city }}, {{ carrier.state }} {{ carrier.zip_code }}
+            <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.address }}, {{ carrier.city }}, {{ carrier.state }} {{ carrier.zip_code }}">Copy</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Carrier Time</td>
+          <td>
+            <span class="mono">{{ carrier.local_time_info.formatted_time }}</span>
+            {% if carrier.local_time_info.is_good_time %}
+              <span class="badge badge-filled">Good time to call</span>
+            {% else %}
+              <span class="badge badge-muted">{{ carrier.local_time_info.label }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Phone</td>
+          <td>
+            {% if carrier.phone_e164 %}
+              <a href="tel:{{ carrier.phone_e164 }}" class="mono"><strong>{{ carrier.phone_e164 }}</strong></a>
+              {% if carrier.phone_added_by_user %}<span class="badge" style="margin-left:4px;">Added by user ({{ carrier.phone_source }})</span>{% endif %}
+              <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.phone_e164 }}">Copy</button>
+            {% else %}
+              <span class="badge badge-muted">Missing</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Email</td>
+          <td>
+            {% if carrier.email and carrier.email_valid %}
+              <a href="mailto:{{ carrier.email }}">{{ carrier.email }}</a>
+              {% if carrier.email_added_by_user %}<span class="badge" style="margin-left:4px;">Added by user ({{ carrier.email_source }})</span>{% endif %}
+              <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.email }}">Copy</button>
+            {% else %}
+              <span class="badge badge-muted">Missing</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Website</td>
+          <td>
+            {% if carrier.website %}
+              <a href="{{ carrier.website }}" target="_blank" rel="noopener">{{ carrier.website }}</a>
+              <button type="button" class="btn btn-sm" style="float:right;" data-copy="{{ carrier.website }}">Copy</button>
+            {% else %}
+              <span class="badge badge-muted">Missing</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Owner / Officer</td>
+          <td>
+            {% if carrier.owner_name %}
+              {{ carrier.owner_name }}
+              {% if carrier.owner_added_by_user %}<span class="badge" style="margin-left:4px;">Added by user</span>{% endif %}
+            {% else %}
+              <span class="badge badge-muted">Missing</span>
+            {% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>3. Fleet, Safety & Insurance</h3>
+    <table>
+      <tbody>
+        <tr>
+          <td class="muted">Power Units / Drivers</td>
+          <td class="mono"><strong>{{ carrier.power_units }}</strong> Power Units / <strong>{{ carrier.drivers }}</strong> Drivers ({{ carrier.trailers }} Trailers)</td>
+        </tr>
+        <tr>
+          <td class="muted">Operation Type</td>
+          <td>{{ carrier.operation_type }}</td>
+        </tr>
+        <tr>
+          <td class="muted">Cargo / Equipment</td>
+          <td>{{ carrier.cargo_types|join:", "|default:"General Freight" }}</td>
+        </tr>
+        <tr>
+          <td class="muted">Safety Rating</td>
+          <td>
+            <span class="badge">{{ carrier.safety_rating }}</span>
+            {% if carrier.basic_alerts %}<span class="badge badge-filled">BASIC ALERT</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">OOS % / Inspections</td>
+          <td class="mono">{{ carrier.oos_percent }}% OOS | {{ carrier.inspection_count_24m }} Insp | {{ carrier.crash_count_24m }} Crashes (24m)</td>
+        </tr>
+        <tr>
+          <td class="muted">Insurance On File</td>
+          <td>
+            {% if carrier.insurance_on_file %}
+              <span class="badge badge-filled">YES</span> <span class="mono">${{ carrier.insurance_amount }}</span>
+            {% else %}
+              <span class="badge">NO</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="muted">Insurance Expiry</td>
+          <td class="mono">{{ carrier.insurance_expiry|date:"Y-m-d"|default:"Missing" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <h3>Change History (Tracked on Sync / Refresh)</h3>
+    {% if changes %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Field</th><th>Previous Value</th><th>New Value</th><th>Changed At (PKT)</th></tr>
+          </thead>
+          <tbody>
+            {% for ch in changes %}
+              <tr>
+                <td class="mono"><strong>{{ ch.field }}</strong></td>
+                <td class="mono muted">{{ ch.old_value }}</td>
+                <td class="mono"><strong>{{ ch.new_value }}</strong></td>
+                <td class="mono">{{ ch.changed_at|date:"Y-m-d H:i:s" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No field changes recorded yet. Click "Refresh Now" above to check for live updates.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h3>Raw Data Tab (Last Fetched Payload)</h3>
+    <pre style="max-height: 260px; overflow: auto; font-size: 12px; background: var(--hover-bg); padding: 10px; border: 1px solid var(--border); margin: 0;" class="mono">{{ raw_json_pretty }}</pre>
+  </div>
+</div>
+{% endblock %}

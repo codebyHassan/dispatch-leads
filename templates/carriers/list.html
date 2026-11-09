@@ -1,0 +1,518 @@
+{% extends "base.html" %}
+{% block title %}Carrier Search — Dispatch Lead Finder{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Carrier Search</h1>
+    <div class="muted">
+      Matching Carriers: <strong class="mono">{{ total_count }}</strong>
+      (Default view hides "Do Not Contact" carriers)
+    </div>
+  </div>
+  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+    <button type="button" id="toggle-filter-drawer" class="btn btn-sm">Toggle Filter Panel</button>
+    <a href="{% url 'export_carriers_csv' %}?{{ query_string }}" class="btn btn-sm btn-primary">Export Filtered CSV ({{ total_count }})</a>
+    <a href="{% url 'carrier_list' %}" class="btn btn-sm">Reset All Filters</a>
+  </div>
+</div>
+
+<!-- Saved Filters Bar -->
+<div class="panel" style="padding: 12px; margin-bottom: 16px;">
+  <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+      <strong>Saved Filter Presets:</strong>
+      {% for sf in saved_filters %}
+        <div style="display: inline-flex; align-items: center; border: 1px solid var(--border-strong);">
+          <a href="{% url 'carrier_list' %}?{{ sf.query_string }}&saved_filter_id={{ sf.pk }}" style="padding: 4px 8px; text-decoration: none; font-size: 12px; font-weight: 600;">
+            {{ sf.name }}
+            {% if sf.alert and sf.alert.new_count > 0 %}
+              <span class="badge badge-filled" style="margin-left: 4px;">+{{ sf.alert.new_count }} new</span>
+            {% endif %}
+          </a>
+          <form method="post" action="{% url 'delete_saved_filter' sf.pk %}" style="margin: 0; border-left: 1px solid var(--border);">
+            {% csrf_token %}
+            <button type="submit" title="Delete preset" style="border: 0; background: transparent; cursor: pointer; padding: 4px 6px; font-size: 11px;">X</button>
+          </form>
+        </div>
+      {% empty %}
+        <span class="muted">No saved presets yet.</span>
+      {% endfor %}
+    </div>
+
+    <form method="post" action="{% url 'save_filter' %}" style="display: flex; align-items: center; gap: 6px; margin: 0;">
+      {% csrf_token %}
+      <input type="hidden" name="query_string" value="{{ query_string }}">
+      <label for="save-filter-name" style="display: none;">Preset Name</label>
+      <input id="save-filter-name" type="text" name="name" required placeholder="Save current filter as..." style="width: 190px; padding: 4px 8px; font-size: 12px;">
+      <button type="submit" class="btn btn-sm">Save Filter</button>
+    </form>
+  </div>
+</div>
+
+<div class="search-layout">
+  <!-- 280px Left Filter Panel with all 10 PRD Filter Groups -->
+  <aside id="carrier-filter-sidebar" class="filter-sidebar">
+    <form method="get" action="{% url 'carrier_list' %}">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h3 style="margin: 0;">Filter Panel</h3>
+        <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+      </div>
+
+      <!-- Top Search Keyword -->
+      <div class="form-group">
+        <label for="f_q">Quick Search (Name, DOT, MC, Phone)</label>
+        <input id="f_q" type="text" name="q" value="{{ params.q|default:'' }}" placeholder="e.g. Lone Star or 3800001">
+      </div>
+
+      <!-- 1. Identity -->
+      <details open style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">1. Identity</summary>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_mc">MC Number</label>
+            <input id="f_mc" type="text" name="mc_number" value="{{ params.mc_number|default:'' }}" placeholder="1500001">
+          </div>
+          <div class="form-group">
+            <label for="f_dot">DOT Number</label>
+            <input id="f_dot" type="text" name="dot_number" value="{{ params.dot_number|default:'' }}" placeholder="3800001">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="f_legal">Legal Name</label>
+          <input id="f_legal" type="text" name="legal_name" value="{{ params.legal_name|default:'' }}">
+        </div>
+        <div class="form-group">
+          <label for="f_dba">DBA Name</label>
+          <input id="f_dba" type="text" name="dba_name" value="{{ params.dba_name|default:'' }}">
+        </div>
+      </details>
+
+      <!-- 2. Authority & MC Age -->
+      <details open style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">2. Authority & MC Age</summary>
+        <div class="grid-3">
+          <div class="form-group">
+            <label for="f_mc_min">Age Min</label>
+            <input id="f_mc_min" type="number" name="mc_age_min" value="{{ params.mc_age_min|default:'' }}" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label for="f_mc_max">Age Max</label>
+            <input id="f_mc_max" type="number" name="mc_age_max" value="{{ params.mc_age_max|default:'' }}" placeholder="90">
+          </div>
+          <div class="form-group">
+            <label for="f_mc_unit">Unit</label>
+            <select id="f_mc_unit" name="mc_age_unit">
+              <option value="days" {% if params.mc_age_unit == 'days' or not params.mc_age_unit %}selected{% endif %}>Days</option>
+              <option value="months" {% if params.mc_age_unit == 'months' %}selected{% endif %}>Months</option>
+              <option value="years" {% if params.mc_age_unit == 'years' %}selected{% endif %}>Years</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_gfrom">Grant From</label>
+            <input id="f_gfrom" type="date" name="grant_from" value="{{ params.grant_from|default:'' }}">
+          </div>
+          <div class="form-group">
+            <label for="f_gto">Grant To</label>
+            <input id="f_gto" type="date" name="grant_to" value="{{ params.grant_to|default:'' }}">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_auth">Status</label>
+            <select id="f_auth" name="authority_status">
+              <option value="">Any</option>
+              <option value="Active" {% if params.authority_status == 'Active' %}selected{% endif %}>Active</option>
+              <option value="Pending" {% if params.authority_status == 'Pending' %}selected{% endif %}>Pending</option>
+              <option value="Inactive" {% if params.authority_status == 'Inactive' %}selected{% endif %}>Inactive</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f_atype">Authority Type</label>
+            <select id="f_atype" name="authority_type">
+              <option value="">Any</option>
+              <option value="Common" {% if params.authority_type == 'Common' %}selected{% endif %}>Common</option>
+              <option value="Contract" {% if params.authority_type == 'Contract' %}selected{% endif %}>Contract</option>
+              <option value="Both" {% if params.authority_type == 'Both' %}selected{% endif %}>Both</option>
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <!-- 3. Location -->
+      <details open style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">3. Location</summary>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_state">State (2-Letter)</label>
+            <input id="f_state" type="text" name="state" maxlength="2" value="{{ params.state|default:'' }}" placeholder="TX">
+          </div>
+          <div class="form-group">
+            <label for="f_country">Country</label>
+            <input id="f_country" type="text" name="country" maxlength="2" value="{{ params.country|default:'' }}" placeholder="US">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="f_city">City</label>
+          <input id="f_city" type="text" name="city" value="{{ params.city|default:'' }}" placeholder="Dallas">
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_zip">ZIP Code</label>
+            <input id="f_zip" type="text" name="zip_code" value="{{ params.zip_code|default:'' }}" placeholder="75201">
+          </div>
+          <div class="form-group">
+            <label for="f_rad">Radius (Miles)</label>
+            <input id="f_rad" type="number" name="radius_miles" value="{{ params.radius_miles|default:'' }}" placeholder="50">
+          </div>
+        </div>
+      </details>
+
+      <!-- 4. Fleet -->
+      <details open style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">4. Fleet Size</summary>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_pmin">Power Units Min</label>
+            <input id="f_pmin" type="number" name="power_min" value="{{ params.power_min|default:'' }}">
+          </div>
+          <div class="form-group">
+            <label for="f_pmax">Power Units Max</label>
+            <input id="f_pmax" type="number" name="power_max" value="{{ params.power_max|default:'' }}">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_dmin">Drivers Min</label>
+            <input id="f_dmin" type="number" name="drivers_min" value="{{ params.drivers_min|default:'' }}">
+          </div>
+          <div class="form-group">
+            <label for="f_dmax">Drivers Max</label>
+            <input id="f_dmax" type="number" name="drivers_max" value="{{ params.drivers_max|default:'' }}">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_tmin">Trailers Min</label>
+            <input id="f_tmin" type="number" name="trailers_min" value="{{ params.trailers_min|default:'' }}">
+          </div>
+          <div class="form-group">
+            <label for="f_tmax">Trailers Max</label>
+            <input id="f_tmax" type="number" name="trailers_max" value="{{ params.trailers_max|default:'' }}">
+          </div>
+        </div>
+      </details>
+
+      <!-- 5. Operation & Equipment -->
+      <details style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">5. Operation & Equipment</summary>
+        <div class="form-group">
+          <label for="f_op">Operation Type</label>
+          <select id="f_op" name="operation_type">
+            <option value="">Any</option>
+            <option value="Interstate" {% if params.operation_type == 'Interstate' %}selected{% endif %}>Interstate</option>
+            <option value="Intrastate" {% if params.operation_type == 'Intrastate' %}selected{% endif %}>Intrastate</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="f_cargo">Cargo Type</label>
+          <select id="f_cargo" name="cargo_type">
+            <option value="">Any Cargo</option>
+            <option value="Dry Van" {% if params.cargo_type == 'Dry Van' %}selected{% endif %}>Dry Van</option>
+            <option value="Reefer" {% if params.cargo_type == 'Reefer' %}selected{% endif %}>Reefer</option>
+            <option value="Flatbed" {% if params.cargo_type == 'Flatbed' %}selected{% endif %}>Flatbed</option>
+            <option value="Power Only" {% if params.cargo_type == 'Power Only' %}selected{% endif %}>Power Only</option>
+            <option value="Box Truck" {% if params.cargo_type == 'Box Truck' %}selected{% endif %}>Box Truck</option>
+            <option value="Hazmat" {% if params.cargo_type == 'Hazmat' %}selected{% endif %}>Hazmat</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="f_eq">Equipment Tag</label>
+          <input id="f_eq" type="text" name="equipment" value="{{ params.equipment|default:'' }}" placeholder="e.g. Flatbed">
+        </div>
+      </details>
+
+      <!-- 6. Safety -->
+      <details style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">6. Safety & Inspections</summary>
+        <div class="form-group">
+          <label for="f_safe">Safety Rating</label>
+          <select id="f_safe" name="safety_rating">
+            <option value="">Any</option>
+            <option value="Satisfactory" {% if params.safety_rating == 'Satisfactory' %}selected{% endif %}>Satisfactory</option>
+            <option value="Conditional" {% if params.safety_rating == 'Conditional' %}selected{% endif %}>Conditional</option>
+            <option value="Unrated" {% if params.safety_rating == 'Unrated' %}selected{% endif %}>Unrated</option>
+          </select>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_oos">Max OOS %</label>
+            <input id="f_oos" type="number" step="0.1" name="oos_max" value="{{ params.oos_max|default:'' }}" placeholder="25.0">
+          </div>
+          <div class="form-group">
+            <label for="f_crash">Max Crashes (24m)</label>
+            <input id="f_crash" type="number" name="crashes_max" value="{{ params.crashes_max|default:'' }}">
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_imin">Inspections Min</label>
+            <input id="f_imin" type="number" name="inspections_min" value="{{ params.inspections_min|default:'' }}">
+          </div>
+          <div class="form-group">
+            <label for="f_basic">BASIC Alerts</label>
+            <select id="f_basic" name="basic_alerts">
+              <option value="">Any</option>
+              <option value="no" {% if params.basic_alerts == 'no' %}selected{% endif %}>No Alerts</option>
+              <option value="yes" {% if params.basic_alerts == 'yes' %}selected{% endif %}>Has Alerts</option>
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <!-- 7. Insurance -->
+      <details style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">7. Insurance</summary>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_ins">Insurance On File</label>
+            <select id="f_ins" name="insurance_on_file">
+              <option value="">Any</option>
+              <option value="yes" {% if params.insurance_on_file == 'yes' %}selected{% endif %}>Yes</option>
+              <option value="no" {% if params.insurance_on_file == 'no' %}selected{% endif %}>No</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f_iexp">Expiry Window</label>
+            <select id="f_iexp" name="insurance_expiring">
+              <option value="">Any</option>
+              <option value="30" {% if params.insurance_expiring == '30' %}selected{% endif %}>Expiring &le; 30 Days</option>
+              <option value="60" {% if params.insurance_expiring == '60' %}selected{% endif %}>Expiring &le; 60 Days</option>
+              <option value="expired" {% if params.insurance_expiring == 'expired' %}selected{% endif %}>Expired</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="f_lmin">Min Liability ($)</label>
+          <input id="f_lmin" type="number" name="liability_min" value="{{ params.liability_min|default:'' }}" placeholder="750000">
+        </div>
+      </details>
+
+      <!-- 8. Contact Completeness -->
+      <details open style="margin-bottom: 10px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">8. Contact Info</summary>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_phone">Has Phone</label>
+            <select id="f_phone" name="has_phone">
+              <option value="">Any</option>
+              <option value="yes" {% if params.has_phone == 'yes' %}selected{% endif %}>Yes</option>
+              <option value="no" {% if params.has_phone == 'no' %}selected{% endif %}>No (Missing)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f_email">Has Email</label>
+            <select id="f_email" name="has_email">
+              <option value="">Any</option>
+              <option value="yes" {% if params.has_email == 'yes' %}selected{% endif %}>Yes</option>
+              <option value="no" {% if params.has_email == 'no' %}selected{% endif %}>No (Missing)</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_web">Has Website</label>
+            <select id="f_web" name="has_website">
+              <option value="">Any</option>
+              <option value="yes" {% if params.has_website == 'yes' %}selected{% endif %}>Yes</option>
+              <option value="no" {% if params.has_website == 'no' %}selected{% endif %}>No</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f_vcon">Verified Contact</label>
+            <select id="f_vcon" name="has_verified_contact">
+              <option value="">Any</option>
+              <option value="yes" {% if params.has_verified_contact == 'yes' %}selected{% endif %}>Yes</option>
+              <option value="no" {% if params.has_verified_contact == 'no' %}selected{% endif %}>No</option>
+            </select>
+          </div>
+        </div>
+      </details>
+
+      <!-- 9. Lead State & 10. Data Freshness -->
+      <details style="margin-bottom: 12px; border-top: 1px solid var(--border); padding-top: 8px;">
+        <summary style="font-weight: 700; cursor: pointer; margin-bottom: 8px;">9. Lead State & Freshness</summary>
+        <div class="form-group">
+          <label for="f_lstate">Lead Pipeline State</label>
+          <select id="f_lstate" name="lead_state">
+            <option value="">All (Except DNC)</option>
+            <option value="Not a lead" {% if params.lead_state == 'Not a lead' %}selected{% endif %}>Not a lead yet</option>
+            <option value="New" {% if params.lead_state == 'New' %}selected{% endif %}>New</option>
+            <option value="Contacted" {% if params.lead_state == 'Contacted' %}selected{% endif %}>Contacted</option>
+            <option value="Interested" {% if params.lead_state == 'Interested' %}selected{% endif %}>Interested</option>
+            <option value="Negotiation" {% if params.lead_state == 'Negotiation' %}selected{% endif %}>Negotiation</option>
+            <option value="Signed" {% if params.lead_state == 'Signed' %}selected{% endif %}>Signed</option>
+            <option value="Rejected" {% if params.lead_state == 'Rejected' %}selected{% endif %}>Rejected</option>
+            <option value="Do Not Contact" {% if params.lead_state == 'Do Not Contact' %}selected{% endif %}>Do Not Contact</option>
+          </select>
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label for="f_uafter">Synced After</label>
+            <input id="f_uafter" type="date" name="updated_after" value="{{ params.updated_after|default:'' }}">
+          </div>
+          <div class="form-group">
+            <label for="f_ubefore">Synced Before</label>
+            <input id="f_ubefore" type="date" name="updated_before" value="{{ params.updated_before|default:'' }}">
+          </div>
+        </div>
+      </details>
+
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="per_page" value="{{ per_page }}">
+      <button type="submit" class="btn btn-primary" style="width: 100%;">Apply Filters</button>
+    </form>
+  </aside>
+
+  <section class="search-main">
+    <!-- Sort, Per-Page & Bulk Actions Toolbar -->
+    <form method="post" action="{% url 'bulk_carrier_action' %}">
+      {% csrf_token %}
+      <input type="hidden" name="return_query" value="{{ query_string }}">
+
+      <div class="panel" style="padding: 10px 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span id="selected-carriers-count" class="mono muted">0 selected</span>
+          <button type="submit" name="bulk_action" value="add_to_leads" class="btn btn-sm btn-primary">Bulk Add to Leads</button>
+          <button type="submit" name="bulk_action" value="export_csv" class="btn btn-sm">Export Selected CSV</button>
+          <button type="submit" name="bulk_action" value="refresh_data" class="btn btn-sm">Refresh Selected</button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <span class="muted" style="font-size: 12px;">Rows:</span>
+          <a href="?{{ query_without_sort }}&sort={{ sort }}&per_page=25" class="btn btn-sm {% if per_page == 25 %}btn-primary{% endif %}">25</a>
+          <a href="?{{ query_without_sort }}&sort={{ sort }}&per_page=50" class="btn btn-sm {% if per_page == 50 %}btn-primary{% endif %}">50</a>
+          <a href="?{{ query_without_sort }}&sort={{ sort }}&per_page=100" class="btn btn-sm {% if per_page == 100 %}btn-primary{% endif %}">100</a>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 32px;">
+                <input type="checkbox" id="select-all-carriers" aria-label="Select all rows">
+              </th>
+              <th>
+                <a href="?{{ query_without_sort }}&sort={% if sort == 'dot_number' %}-dot_number{% else %}dot_number{% endif %}">DOT / MC</a>
+              </th>
+              <th>
+                <a href="?{{ query_without_sort }}&sort={% if sort == 'legal_name' %}-legal_name{% else %}legal_name{% endif %}">Carrier Name</a>
+              </th>
+              <th>
+                <a href="?{{ query_without_sort }}&sort={% if sort == 'state' %}-state{% else %}state{% endif %}">State / City</a>
+              </th>
+              <th>
+                <a href="?{{ query_without_sort }}&sort={% if sort == '-authority_grant_date' %}authority_grant_date{% else %}-authority_grant_date{% endif %}">MC Age</a>
+              </th>
+              <th>
+                <a href="?{{ query_without_sort }}&sort={% if sort == '-power_units' %}power_units{% else %}-power_units{% endif %}">Fleet</a>
+              </th>
+              <th>Phone & Local Time</th>
+              <th>
+                <a href="?{{ query_without_sort }}&sort={% if sort == 'safety_rating' %}-safety_rating{% else %}safety_rating{% endif %}">Authority / Insurance</a>
+              </th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in page_obj %}
+              <tr>
+                <td>
+                  <input type="checkbox" name="selected_dots" value="{{ c.dot_number }}" class="carrier-row-checkbox" aria-label="Select {{ c.legal_name }}">
+                </td>
+                <td class="mono">
+                  <a href="{% url 'carrier_detail' c.dot_number %}"><strong>DOT {{ c.dot_number }}</strong></a><br>
+                  <span class="muted">MC-{{ c.mc_number|default:"Missing" }}</span>
+                </td>
+                <td>
+                  <a href="{% url 'carrier_detail' c.dot_number %}"><strong>{{ c.legal_name }}</strong></a>
+                  {% if c.dba_name %}<div class="muted" style="font-size: 12px;">DBA: {{ c.dba_name }}</div>{% endif %}
+                  <div class="muted" style="font-size: 11px;">{{ c.cargo_types|join:", " }}</div>
+                </td>
+                <td>
+                  {{ c.city }}, <strong>{{ c.state }}</strong>
+                  <div class="muted mono" style="font-size: 11px;">{{ c.zip_code }}</div>
+                </td>
+                <td>
+                  <span class="mono">{{ c.mc_age_display }}</span>
+                  {% if c.is_new_authority %}
+                    <span class="badge badge-filled" style="margin-left: 4px;">NEW</span>
+                  {% endif %}
+                  <div class="muted mono" style="font-size: 11px;">{{ c.authority_grant_date|date:"Y-m-d"|default:"—" }}</div>
+                </td>
+                <td class="mono">
+                  <strong>{{ c.power_units }}</strong> PU<br>
+                  <span class="muted">{{ c.drivers }} Drv</span>
+                </td>
+                <td>
+                  {% if c.phone_e164 %}
+                    <div>
+                      <a href="tel:{{ c.phone_e164 }}" class="mono">{{ c.phone_e164 }}</a>
+                      <button type="button" class="btn btn-sm" style="padding: 1px 5px; font-size: 10px;" data-copy="{{ c.phone_e164 }}">Copy</button>
+                    </div>
+                  {% else %}
+                    <span class="badge badge-muted">Missing</span>
+                  {% endif %}
+                  <div style="font-size: 11px; margin-top: 2px;">
+                    <span class="mono muted">{{ c.local_time_info.formatted_time }}</span>
+                    {% if c.local_time_info.is_good_time %}
+                      <span class="badge badge-filled" style="font-size: 9px; padding: 1px 4px;">CALL NOW</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td>
+                  <span class="badge {% if c.authority_status == 'Active' %}badge-filled{% endif %}">{{ c.authority_status }}</span>
+                  <span class="badge">{{ c.safety_rating }}</span>
+                  {% if c.has_insurance_alert %}
+                    <div style="margin-top: 3px;"><span class="badge">INS ALERT</span></div>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if c.user_lead %}
+                    <a href="{% url 'lead_detail' c.user_lead.pk %}" class="btn btn-sm">Open Lead ({{ c.user_lead.status }})</a>
+                  {% else %}
+                    <a href="{% url 'add_carrier_to_leads' c.dot_number %}" class="btn btn-sm btn-primary">+ Lead</a>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="9" class="muted">No carriers match the current filter criteria.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
+      <div class="muted">
+        Showing page <strong>{{ page_obj.number }}</strong> of <strong>{{ page_obj.paginator.num_pages }}</strong>
+        ({{ total_count }} total carriers)
+      </div>
+      <div style="display: flex; gap: 6px;">
+        {% if page_obj.has_previous %}
+          <a href="?{{ query_string }}&page=1" class="btn btn-sm">&laquo; First</a>
+          <a href="?{{ query_string }}&page={{ page_obj.previous_page_number }}" class="btn btn-sm">Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+          <a href="?{{ query_string }}&page={{ page_obj.next_page_number }}" class="btn btn-sm">Next</a>
+          <a href="?{{ query_string }}&page={{ page_obj.paginator.num_pages }}" class="btn btn-sm">Last &raquo;</a>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Import Leads from CSV — Dispatch Lead Finder & CRM{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Import Leads from CSV</h1>
+    <div class="muted">Upload a CSV file containing carrier DOT or MC numbers to create leads in bulk.</div>
+  </div>
+  <a href="{% url 'lead_list' %}" class="btn">&larr; Back to Leads</a>
+</div>
+
+<div class="grid-2">
+  <div class="panel-strong">
+    <h2>Upload CSV File</h2>
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <div class="form-group">
+        <label for="id_csv_file">Select CSV File</label>
+        <input id="id_csv_file" type="file" name="csv_file" accept=".csv" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Import Leads</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Expected Columns in CSV</h2>
+    <p>The importer automatically matches existing carriers in your database using one of these headers:</p>
+    <ul>
+      <li><span class="mono">DOT Number</span> or <span class="mono">dot_number</span> or <span class="mono">DOT</span></li>
+      <li><span class="mono">MC Number</span> or <span class="mono">mc_number</span> or <span class="mono">MC</span></li>
+      <li><span class="mono">Status</span> (optional, defaults to "New")</li>
+    </ul>
+    <p class="help-text">Duplicates are safely skipped (one lead per carrier per user).</p>
+  </div>
+</div>
+{% endblock %}
+

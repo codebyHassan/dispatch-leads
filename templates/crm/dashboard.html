@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Dispatch Lead Finder & CRM{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Dispatch Sales Dashboard</h1>
+    <div class="muted">Carriers in Database: <strong class="mono">{{ total_carriers }}</strong> | Active Leads: <strong class="mono">{{ total_leads }}</strong></div>
+  </div>
+  <div style="display: flex; gap: 8px;">
+    <a href="{% url 'download_backup_db' %}" class="btn btn-sm">Backup Database (SQLite)</a>
+    <a href="{% url 'carrier_list' %}?mc_age_max=90&state=TX" class="btn btn-primary">Hot Leads: New MC &lt;90d (TX)</a>
+    <a href="{% url 'carrier_list' %}" class="btn">All Carriers</a>
+    <a href="{% url 'sync_dashboard' %}" class="btn">Sync Data</a>
+  </div>
+</div>
+
+<div class="grid-4" style="margin-bottom: 16px;">
+  <div class="panel-strong">
+    <div class="muted">New Leads This Week</div>
+    <div style="font-size: 26px; font-weight: 700;" class="mono">{{ new_leads_week }}</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Calls Logged This Week</div>
+    <div style="font-size: 26px; font-weight: 700;" class="mono">{{ calls_week }}</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Follow-Ups Due Today</div>
+    <div style="font-size: 26px; font-weight: 700;" class="mono">{{ today_tasks|length }}</div>
+  </div>
+  <div class="panel-strong">
+    <div class="muted">Signed This Month</div>
+    <div style="font-size: 26px; font-weight: 700;" class="mono">{{ signed_month }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <h2>Pipeline Stage Breakdown</h2>
+    {% for stage_name, count in stages %}
+      <div style="margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 3px;">
+          <a href="{% url 'lead_list' %}?status={{ stage_name|urlencode }}">{{ stage_name }}</a>
+          <span class="mono">{{ count }}</span>
+        </div>
+        <div class="progress-track" style="height: 10px;">
+          <div class="progress-fill" style="width: {% widthratio count max_stage 100 %}%;"></div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="panel">
+    <h2>Follow-Ups & Tasks</h2>
+    {% if overdue_tasks %}
+      <h3 style="margin-top: 0;">Overdue ({{ overdue_tasks|length }})</h3>
+      <ul style="padding-left: 18px; margin-top: 4px;">
+        {% for t in overdue_tasks %}
+          <li>
+            <span class="badge badge-filled">OVERDUE</span>
+            <a href="{% url 'lead_detail' t.lead_id %}">{{ t.lead.carrier.legal_name }}</a> — {{ t.title }}
+            <span class="muted mono">({{ t.due_at|date:"M d, H:i" }} PKT)</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No overdue tasks.</p>
+    {% endif %}
+
+    <h3>Due Today ({{ today_tasks|length }})</h3>
+    {% if today_tasks %}
+      <ul style="padding-left: 18px; margin-top: 4px;">
+        {% for t in today_tasks %}
+          <li>
+            <a href="{% url 'lead_detail' t.lead_id %}">{{ t.lead.carrier.legal_name }}</a> — {{ t.title }}
+            <span class="muted mono">({{ t.due_at|date:"H:i" }} PKT)</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No follow-ups due today.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <h2>Saved Filters & Daily New Carrier Alerts</h2>
+    {% if saved_filters %}
+      <table>
+        <thead>
+          <tr><th>Preset Name</th><th>New Since Last Check</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {% for sf in saved_filters %}
+            <tr>
+              <td><strong>{{ sf.name }}</strong></td>
+              <td>
+                {% if sf.alert and sf.alert.new_count > 0 %}
+                  <span class="badge badge-filled">+{{ sf.alert.new_count }} new carriers</span>
+                {% else %}
+                  <span class="muted">0 new</span>
+                {% endif %}
+              </td>
+              <td>
+                <a href="{% url 'carrier_list' %}?{{ sf.query_string }}&saved_filter_id={{ sf.pk }}" class="btn btn-sm">Open Filter</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No saved filters yet. Save any filter combination on the Search page.</p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Rejected Leads — Reasons for Loss</h2>
+    {% if lost_reasons %}
+      <table>
+        <thead>
+          <tr><th>Loss Reason</th><th>Count</th></tr>
+        </thead>
+        <tbody>
+          {% for row in lost_reasons %}
+            <tr>
+              <td>{{ row.lost_reason }}</td>
+              <td class="mono"><strong>{{ row.cnt }}</strong></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No rejected leads recorded yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
